@@ -12,8 +12,9 @@
 #ifndef GAMEDATA_H
 #define GAMEDATA_H
 
-#define MAX_PLAYERS 8
-#define DECK_SIZE   58  // 52 standard + 4 Anteater cards + 2 Jokers
+#define MAX_PLAYERS  8
+#define MAX_NAME_LEN 32
+#define DECK_SIZE    58  // 52 standard + 4 Anteater cards + 2 Jokers
 
 //=============================================================================
 
@@ -28,7 +29,7 @@ typedef struct {
 } Deck;
 
 typedef struct {
-    char name[32];
+    char name[MAX_NAME_LEN];
     int seat;
     int points;
 
