@@ -77,10 +77,10 @@ void InitializeGUI(int argc, char *argv[])
     GtkWidget *pBtnRaise = gtk_button_new_with_label("RAISE");
 
     /* Map buttons to the action handler, passing the PlayerAction enum value */
-    g_signal_connect(pBtnFold, "clicked", G_CALLBACK(OnActionButtonClicked), GINT_TO_POINTER(ACTION_FOLD));
-    g_signal_connect(pBtnCheck, "clicked", G_CALLBACK(OnActionButtonClicked), GINT_TO_POINTER(ACTION_CHECK));
-    g_signal_connect(pBtnCall, "clicked", G_CALLBACK(OnActionButtonClicked), GINT_TO_POINTER(ACTION_CALL));
-    g_signal_connect(pBtnRaise, "clicked", G_CALLBACK(OnActionButtonClicked), GINT_TO_POINTER(ACTION_RAISE));
+    g_signal_connect(pBtnFold, "clicked", G_CALLBACK(OnActionButtonClicked), GINT_TO_POINTER(PLAYER_ACTION_FOLD));
+    g_signal_connect(pBtnCheck, "clicked", G_CALLBACK(OnActionButtonClicked), GINT_TO_POINTER(PLAYER_ACTION_CHECK));
+    g_signal_connect(pBtnCall, "clicked", G_CALLBACK(OnActionButtonClicked), GINT_TO_POINTER(PLAYER_ACTION_CALL));
+    g_signal_connect(pBtnRaise, "clicked", G_CALLBACK(OnActionButtonClicked), GINT_TO_POINTER(PLAYER_ACTION_RAISE));
 
     /* Distribute buttons evenly across the horizontal box */
     gtk_box_pack_start(GTK_BOX(pHBox), pBtnFold, TRUE, TRUE, 0);

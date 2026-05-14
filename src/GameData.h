@@ -18,6 +18,19 @@
 
 //=============================================================================
 
+/**
+ * @brief Standard player actions translated into network protocol values.
+ */
+typedef enum {
+    PLAYER_ACTION_JOIN = 0,
+    PLAYER_ACTION_FOLD,
+    PLAYER_ACTION_CHECK,
+    PLAYER_ACTION_CALL,
+    PLAYER_ACTION_RAISE
+} PLAYER_ACTION;
+
+//=============================================================================
+
 typedef struct {
     char suit;  // 'H', 'D', 'C', 'S', or 'N' for None
     int rank;   // 2-10, 11(J), 12(Q), 13(K), 14(Anteater), 15(Ace), 16(Joker)
