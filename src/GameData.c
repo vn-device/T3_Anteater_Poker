@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include "GameData.h"
+#include "HandEval.h"
 
 //=============================================================================
 
