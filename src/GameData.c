@@ -124,3 +124,89 @@ unsigned char IsValidAction(Player* pPlayer, int action, int amount, int current
 }
 
 //=============================================================================
+
+void DetermineWinner(Table* pTable)
+{
+    int eligiblePlayers[MAX_PLAYERS];
+    int winnerIndexes[MAX_PLAYERS];
+    int eligibleCount = 0;
+    int winnerCount = 0;
+    HandValue bestValue;
+
+    if (pTable == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        if (pTable->players[i].socket != -1 && !pTable->players[i].isFolded) {
+            eligiblePlayers[eligibleCount++] = i;
+        }
+    }
+
+    if (eligibleCount == 0) {
+        return;
+    }
+
+    if (eligibleCount == 1) {
+        int winner = eligiblePlayers[0];
+        pTable->players[winner].points += pTable->pot;
+        printf("Winner: %s wins %d points by default.\n",
+               pTable->players[winner].name,
+               pTable->pot);
+        pTable->pot = 0;
+        return;
+    }
+
+    bestValue.category = HAND_CATEGORY_INVALID;
+
+    for (int i = 0; i < eligibleCount; i++) {
+        int playerIndex = eligiblePlayers[i];
+        Card cards[7];
+        HandValue playerValue;
+
+        cards[0] = pTable->players[playerIndex].hand[0];
+        cards[1] = pTable->players[playerIndex].hand[1];
+        for (int c = 0; c < 5; c++) {
+            cards[c + 2] = pTable->community[c];
+        }
+
+        EvaluateBestHand(cards, 7, &playerValue);
+        if (playerValue.category == HAND_CATEGORY_INVALID) {
+            continue;
+        }
+
+        int comparison = (bestValue.category == HAND_CATEGORY_INVALID)
+                         ? 1
+                         : CompareHandValues(&playerValue, &bestValue);
+
+        if (comparison > 0) {
+            bestValue = playerValue;
+            winnerIndexes[0] = playerIndex;
+            winnerCount = 1;
+        }
+        else if (comparison == 0) {
+            winnerIndexes[winnerCount++] = playerIndex;
+        }
+    }
+
+    if (winnerCount == 0) {
+        return;
+    }
+
+    int share = pTable->pot / winnerCount;
+    int remainder = pTable->pot % winnerCount;
+
+    printf("Winning hand: %s\n", HandCategoryToString(bestValue.category));
+
+    for (int i = 0; i < winnerCount; i++) {
+        int playerIndex = winnerIndexes[i];
+        int award = share + (i < remainder ? 1 : 0);
+
+        pTable->players[playerIndex].points += award;
+        printf("Winner: %s wins %d points.\n",
+               pTable->players[playerIndex].name,
+               award);
+    }
+
+    pTable->pot = 0;
+}
