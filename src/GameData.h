@@ -16,7 +16,47 @@
 #define MAX_NAME_LEN 32
 #define DECK_SIZE    58  // 52 standard + 4 Anteater cards + 2 Jokers
 
+/* Card Suit Characters */
+#define SUIT_HEARTS   'H'
+#define SUIT_DIAMONDS 'D'
+#define SUIT_CLUBS    'C'
+#define SUIT_SPADES   'S'
+#define SUIT_NONE     'N'
+
 //=============================================================================
+
+typedef enum {
+    CARD_RANK_TWO = 2,
+    CARD_RANK_THREE,
+    CARD_RANK_FOUR,
+    CARD_RANK_FIVE,
+    CARD_RANK_SIX,
+    CARD_RANK_SEVEN,
+    CARD_RANK_EIGHT,
+    CARD_RANK_NINE,
+    CARD_RANK_TEN,
+    CARD_RANK_JACK,
+    CARD_RANK_QUEEN,
+    CARD_RANK_KING,
+    CARD_RANK_ANTEATER,
+    CARD_RANK_ACE,
+    CARD_RANK_JOKER
+} CARD_RANK;
+
+typedef enum {
+    GAME_STATE_WAITING = 0,
+    GAME_STATE_PRE_FLOP,
+    GAME_STATE_FLOP,
+    GAME_STATE_TURN,
+    GAME_STATE_RIVER,
+    GAME_STATE_SHOWDOWN
+} GAME_STATE;
+
+typedef enum {
+    COMMUNITY_START_FLOP = 0,
+    COMMUNITY_START_TURN = 3,
+    COMMUNITY_START_RIVER = 4
+} COMMUNITY_START;
 
 /**
  * @brief Standard player actions translated into network protocol values.
@@ -91,6 +131,13 @@ void DealCommunityCards(Table *pTable, Deck *pDeck, int count);
  * Evaluates all hands at Showdown to determine the winner and award the pot.
  */
 void DetermineWinner(Table *pTable);
+
+/**
+ * Determines the starting dealer index for a round.
+ * @param pTable Pointer to the table state
+ * @return The dealer's seat index
+ */
+int GetDealerIndex(Table *pTable);
 
 /**
  * Validates if a player's requested action (e.g., Raise) is legal given their points.

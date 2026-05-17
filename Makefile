@@ -19,11 +19,14 @@ SRC_DIR = src
 BIN_DIR = bin
 
 # Source and Object files
-SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/GameData.c $(SRC_DIR)/GameProtocol.c $(SRC_DIR)/GameGUI.c
+SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/GameData.c $(SRC_DIR)/GameProtocol.c $(SRC_DIR)/GameGUI.c $(SRC_DIR)/HandEval.c
 OBJS = $(SRCS:.c=.o)
 
 # Output executable name
 TARGET = $(BIN_DIR)/poker
+TEST_TARGET = $(BIN_DIR)/hand_eval_tests
+TEST_SRCS = tests/HandEvalTests.c $(SRC_DIR)/GameData.c $(SRC_DIR)/HandEval.c
+TEST_CFLAGS = -Wall -std=c11 -g -I$(SRC_DIR)
 
 #==============================================================================
 # Build Rules

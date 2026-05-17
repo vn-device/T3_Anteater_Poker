@@ -23,6 +23,12 @@
 #define CMD_ACTION "ACTION"
 #define CMD_UPDATE "UPDATE"
 
+/* Network Action Type Constants */
+#define ACTION_TYPE_FOLD  1
+#define ACTION_TYPE_CHECK 2
+#define ACTION_TYPE_CALL  3
+#define ACTION_TYPE_RAISE 4
+
 //=============================================================================
 
 /**
