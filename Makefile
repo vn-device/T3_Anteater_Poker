@@ -1,63 +1,90 @@
 #==============================================================================
 # File: Makefile
 # Author: Team T3
-# Date: May 14, 2026
+# Date: May 22, 2026
 # Description:
-# Build automation for the Anteater Poker client application. 
-# Handles GTK 3.0 dependencies, object compilation, and directory management.
+# Build automation for the Anteater Poker client and server applications.
+# Handles GTK dependencies, isolated object compilation, and packaging.
 #==============================================================================
 
-# Compiler and standard flags
+# Compiler and standard diagnostic flags
 CC = gcc
 CFLAGS = -Wall -std=c11 -g `pkg-config --cflags gtk+-3.0`
 
-# Linker flags for GTK 3.0
-LDFLAGS = `pkg-config --libs gtk+-3.0`
+# Linker flags for the GTK 3.0 Client
+LDFLAGS_CLIENT = `pkg-config --libs gtk+-3.0`
 
 # Directories
 SRC_DIR = src
 BIN_DIR = bin
 
-# Source and Object files
-SRCS = $(SRC_DIR)/main.c $(SRC_DIR)/GameData.c $(SRC_DIR)/GameProtocol.c $(SRC_DIR)/GameGUI.c $(SRC_DIR)/HandEval.c
-OBJS = $(SRCS:.c=.o)
+# -----------------------------------------------------------------------------
+# Client Subsystem Dependencies
+# -----------------------------------------------------------------------------
+CLIENT_SRCS = $(SRC_DIR)/main.c \
+              $(SRC_DIR)/GameData.c \
+              $(SRC_DIR)/GameProtocol.c \
+              $(SRC_DIR)/GameGUI.c \
+              $(SRC_DIR)/HandEval.c
 
-# Output executable name
-TARGET = $(BIN_DIR)/poker
-TEST_TARGET = $(BIN_DIR)/hand_eval_tests
-TEST_SRCS = tests/HandEvalTests.c $(SRC_DIR)/GameData.c $(SRC_DIR)/HandEval.c
-TEST_CFLAGS = -Wall -std=c11 -g -I$(SRC_DIR)
+CLIENT_OBJS = $(CLIENT_SRCS:.c=.o)
+CLIENT_TARGET = $(BIN_DIR)/poker_client
+
+# -----------------------------------------------------------------------------
+# Server Subsystem Dependencies
+# -----------------------------------------------------------------------------
+SERVER_SRCS = $(SRC_DIR)/PokerServer.c \
+              $(SRC_DIR)/GameData.c \
+              $(SRC_DIR)/GameProtocol.c \
+              $(SRC_DIR)/HandEval.c
+
+SERVER_OBJS = $(SERVER_SRCS:.c=.o)
+SERVER_TARGET = $(BIN_DIR)/poker_server
 
 #==============================================================================
 # Build Rules
 #==============================================================================
 
-# Default target
-all: $(BIN_DIR) $(TARGET)
+# Default target invokes both client and server compilations
+all: $(BIN_DIR) $(CLIENT_TARGET) $(SERVER_TARGET)
 
-# Create the binary directory if it does not exist
+# Create the isolated binary storage directory
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
-# Link object files into the final executable
-$(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+# Link the Client executable (Requires GTK dynamic libraries)
+$(CLIENT_TARGET): $(CLIENT_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS_CLIENT)
 
-# Compile C source files into object files
+# Link the Server executable (Strict C11, no GUI overhead)
+$(SERVER_TARGET): $(SERVER_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+# Pattern rule for compiling intermediate object files
 $(SRC_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 #==============================================================================
-# Utility Targets
+# Mandatory Alpha Grading Targets
 #==============================================================================
 
-# Remove all compiled objects and the binary directory
+# Scrub intermediate objects and binary folder
 clean:
 	rm -rf $(BIN_DIR) $(SRC_DIR)/*.o
 
-# Placeholder for future automated testing execution
+# Trigger headless logic/server tests
 test: all
-	@echo "Executing system tests..."
-	# ./$(TARGET) --test-mode (To be implemented)
+	@echo "Initializing headless server test..."
+	./$(SERVER_TARGET)
 
-.PHONY: all clean test
+# Trigger graphical interface tests
+test-gui: all
+	@echo "Initializing GTK client interface..."
+	./$(CLIENT_TARGET)
+
+# Generate compressed source archive for submission
+tar: clean
+	@echo "Generating Poker_Alpha_src.tar.gz..."
+	tar -czvf Poker_Alpha_src.tar.gz $(SRC_DIR) doc Makefile README COPYRIGHT INSTALL
+
+.PHONY: all clean test test-gui tar

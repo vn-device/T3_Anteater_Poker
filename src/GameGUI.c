@@ -9,8 +9,11 @@
  * interactions to protocol events.
  *****************************************************************************/
 
+#include <string.h>
+#include <sys/socket.h>
 #include "GameGUI.h"
 #include "GameData.h"
+#include "GameProtocol.h"
 
 static GtkWidget *pMainWindow;
 
@@ -31,18 +34,28 @@ static GtkWidget *pMainWindow;
 
 /**
  * Event handler triggered when a user clicks a gameplay action button.
- * Casts the gpointer data back to a PlayerAction integer.
+ * Casts the gpointer data back to a PlayerAction integer and transmits 
+ * the serialized packet to the server.
  */
 static void OnActionButtonClicked(GtkWidget *widget, gpointer data)
 {
-    int action = GPOINTER_TO_INT(data);
-    g_print("Action triggered: %d\n", action);
+    /* Pull the global socket descriptor defined in main.c */
+    extern int g_client_socket;
     
-    /* Future integration point:
-     * char buffer[MAX_MSG_LEN];
-     * BuildActionMessage(buffer, clientSeat, action, currentBetAmount);
-     * SendMessageToServer(buffer);
-     */
+    int action = GPOINTER_TO_INT(data);
+    char buffer[MAX_MSG_LEN];
+
+    /* Hardcoded seat 0 and bet amount 50 for Alpha testing purposes */
+    BuildActionMessage(buffer, 0, action, 50);
+    
+    /* Transmit the serialized network action */
+    if (g_client_socket != -1) {
+        send(g_client_socket, buffer, strlen(buffer), 0);
+        g_print("Sent to server: %s", buffer);
+    }
+    else {
+        g_printerr("Error: Socket disconnected. Cannot send action.\n");
+    }
 }
 
 //=============================================================================
