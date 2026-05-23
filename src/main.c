@@ -29,29 +29,32 @@ int g_client_socket = -1;
 
 /**
  * Asynchronous callback triggered by the GTK event loop whenever data 
- * arrives on the connected TCP socket.
+ * arrives on the connected TCP socket. Uses raw POSIX read to prevent 
+ * GTK thread deadlocks.
  */
 static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition condition, gpointer data)
 {
     char buffer[MAX_MSG_LEN];
-    gsize bytes_read;
-    GError *error = NULL;
+    
+    /* Extract the raw POSIX file descriptor from the GLib channel */
+    int fd = g_io_channel_unix_get_fd(source);
 
-    /* Read the incoming packet from the channel */
-    GIOStatus status = g_io_channel_read_chars(source, buffer, MAX_MSG_LEN - 1, &bytes_read, &error);
+    /* Use standard POSIX read. It instantly returns whatever bytes are currently 
+       in the OS buffer without waiting to fill MAX_MSG_LEN */
+    ssize_t bytes_read = read(fd, buffer, MAX_MSG_LEN - 1);
 
-    if (status == G_IO_STATUS_ERROR) {
-        g_printerr("Socket read error: %s\n", error->message);
-        g_error_free(error);
+    if (bytes_read < 0) {
+        perror("Socket read error");
         return FALSE; /* Remove watch */
     }
 
-    if (status == G_IO_STATUS_EOF || bytes_read == 0) {
+    if (bytes_read == 0) {
         g_print("Server disconnected. Closing client.\n");
         gtk_main_quit();
         return FALSE; /* Remove watch */
     }
 
+    /* Safely null-terminate the received data */
     buffer[bytes_read] = '\0';
     
     ParsedMessage msg;
@@ -59,10 +62,9 @@ static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition conditi
         g_print("Server Broadcast -> Type: %d, Seat: %d, Payload: %s\n", 
                 msg.type, msg.seat, msg.payload);
         
-        /* * Future Integration: 
-         * Call a GameGUI function here to update table graphics 
-         * based on msg.type (e.g., UpdatePlayerPoints(msg.seat, msg.amount))
-         */
+        /* We will link this to the HUD update logic later */
+    } else {
+        g_printerr("Failed to parse incoming packet: %s\n", buffer);
     }
 
     return TRUE; /* Keep the watch active in the GTK loop */
@@ -109,6 +111,11 @@ int main(int argc, char *argv[])
 
     /* 5. Bind Socket to GTK Event Loop */
     GIOChannel *io_channel = g_io_channel_unix_new(g_client_socket);
+    
+    /* CRITICAL: Disable GLib's UTF-8 encoding checks and internal buffering 
+       so it acts as a raw binary pipe for our POSIX read() calls. */
+    g_io_channel_set_encoding(io_channel, NULL, NULL);
+    g_io_channel_set_buffered(io_channel, FALSE);
     
     /* Instruct GLib to execute OnServerMessageReceived when G_IO_IN (read data) is pending */
     g_io_add_watch(io_channel, G_IO_IN, OnServerMessageReceived, NULL);
