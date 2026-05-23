@@ -105,39 +105,115 @@ static void CreateAndPackActionButtons(GtkWidget *pHBox)
 //=============================================================================
 
 /**
+ * Procedurally draws a playing card using Cairo.
+ * Translates structural ranks and suits into formatted UTF-8 text, 
+ * applying red/black color coding and handling custom Anteater/Joker logic.
+ */
+static void DrawCard(cairo_t *cr, int x, int y, int width, int height, char suit, int rank)
+{
+    /* 1. Draw the base card geometry */
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0); // White card stock
+    cairo_rectangle(cr, x, y, width, height);
+    cairo_fill_preserve(cr);
+    
+    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0); // Black border
+    cairo_set_line_width(cr, 2.0);
+    cairo_stroke(cr);
+
+    /* If rank is 0, treat it as a face-down or empty placeholder */
+    if (rank == 0) return;
+
+    /* 2. Determine Font Color */
+    if (suit == 'H' || suit == 'D') {
+        cairo_set_source_rgb(cr, 0.8, 0.1, 0.1); // Red
+    }
+    else if (suit == 'N') {
+        cairo_set_source_rgb(cr, 0.5, 0.0, 0.5); // Purple for wildcards
+    }
+    else {
+        cairo_set_source_rgb(cr, 0.1, 0.1, 0.1); // Black
+    }
+
+    /* 3. Parse Rank String */
+    char rankStr[8];
+    if (rank >= 2 && rank <= 10) {
+        snprintf(rankStr, sizeof(rankStr), "%d", rank);
+    }
+    else {
+        switch (rank) {
+            case 11: strcpy(rankStr, "J");    break;
+            case 12: strcpy(rankStr, "Q");    break;
+            case 13: strcpy(rankStr, "K");    break;
+            case 14: strcpy(rankStr, "ANT");  break; // Custom Anteater Face Card
+            case 15: strcpy(rankStr, "A");    break;
+            case 16: strcpy(rankStr, "WILD"); break; // Joker
+            default: strcpy(rankStr, "?");    break;
+        }
+    }
+
+    /* 4. Parse Suit Symbol (UTF-8) */
+    char suitStr[8];
+    switch (suit) {
+        case 'H': strcpy(suitStr, "♥"); break;
+        case 'D': strcpy(suitStr, "♦"); break;
+        case 'C': strcpy(suitStr, "♣"); break;
+        case 'S': strcpy(suitStr, "♠"); break;
+        default:  strcpy(suitStr, "");  break;
+    }
+
+    /* 5. Render Text to Canvas */
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 16);
+
+    /* Draw top-left corner text */
+    cairo_move_to(cr, x + 5, y + 20);
+    cairo_show_text(cr, rankStr);
+    
+    cairo_move_to(cr, x + 5, y + 40);
+    cairo_show_text(cr, suitStr);
+}
+
+//=============================================================================
+
+/**
  * Cairo rendering pipeline. Triggered automatically by GTK whenever 
- * the window needs to be redrawn (e.g., resizing or explicit queue_draw calls).
+ * the window needs to be redrawn.
  */
 static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
 {
-    /* Paint the green poker felt background universally */
+    /* Paint the green poker felt background */
     cairo_set_source_rgb(cr, 0.180, 0.545, 0.341); /* SeaGreen (#2E8B57) */
     cairo_paint(cr);
 
-    /* Card geometry parameters */
     int card_width = 70;
     int card_height = 100;
     int spacing = 10;
     
-    /* Calculate starting X to center the 5 community cards */
-    int total_width = (5 * card_width) + (4 * spacing);
-    int start_x = (TABLE_AREA_WIDTH - total_width) / 2;
-    int start_y = (TABLE_AREA_HEIGHT - card_height) / 2;
+    /* --- 1. Draw 5 Community Cards (Center) --- */
+    int comm_total_width = (5 * card_width) + (4 * spacing);
+    int comm_start_x = (TABLE_AREA_WIDTH - comm_total_width) / 2;
+    int comm_start_y = (TABLE_AREA_HEIGHT - card_height) / 2 - 30; // Shifted slightly up
 
-    /* Procedurally draw 5 blank card placeholders */
     for (int i = 0; i < 5; i++) {
-        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0); /* White fill */
+        /* Hardcoded placeholder data for layout testing. 
+           Eventually, this will pull from your global GameData Table struct. */
+        char demoSuit = (i % 2 == 0) ? 'S' : 'H'; 
+        int demoRank = 10 + i; 
         
-        /* Draw card rectangle */
-        cairo_rectangle(cr, start_x + (i * (card_width + spacing)), start_y, card_width, card_height);
-        cairo_fill_preserve(cr); /* Fill but keep the path for the border */
-        
-        cairo_set_source_rgb(cr, 0.0, 0.0, 0.0); /* Black border */
-        cairo_set_line_width(cr, 2.0);
-        cairo_stroke(cr);
+        DrawCard(cr, comm_start_x + (i * (card_width + spacing)), comm_start_y, 
+                 card_width, card_height, demoSuit, demoRank);
     }
 
-    return FALSE; /* Return FALSE to allow other handlers to run if necessary */
+    /* --- 2. Draw 2 Player Hole Cards (Bottom Center) --- */
+    int hole_total_width = (2 * card_width) + spacing;
+    int hole_start_x = (TABLE_AREA_WIDTH - hole_total_width) / 2;
+    int hole_start_y = TABLE_AREA_HEIGHT - card_height - 20;
+
+    /* Draw demo hole cards (Anteater of Clubs and Ace of Spades) */
+    DrawCard(cr, hole_start_x, hole_start_y, card_width, card_height, 'C', 14);
+    DrawCard(cr, hole_start_x + card_width + spacing, hole_start_y, card_width, card_height, 'S', 15);
+
+    return FALSE;
 }
 
 //=============================================================================
