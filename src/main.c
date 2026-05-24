@@ -2,10 +2,12 @@
  * File: main.c
  * Author: Team T3
  * Date: May 23, 2026
- * * * Description:
+ * 
+ * * Description:
  * Entry point for the Anteater Poker client application. Captures 
  * local user credentials via a modal dialog prior to establishing 
  * the TCP socket connection and spawning the asynchronous GIO loop.
+ * Supports an --offline command-line flag for headless GUI testing.
  *****************************************************************************/
 
 #include <stdio.h>
@@ -75,17 +77,40 @@ int main(int argc, char *argv[])
     char playerName[MAX_NAME_LEN];
     char playerPassword[MAX_NAME_LEN];
     int localSeat = -1;
+    int isOfflineMode = 0;
+
+    /* Scan command-line arguments for the GUI bypass flag */
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--offline") == 0) {
+            isOfflineMode = 1;
+            break;
+        }
+    }
 
     /* 1. Initialize GTK first to enable rendering of the credential dialog */
     gtk_init(&argc, &argv);
 
-    /* 2. Block execution to collect network credentials */
+    /* 2. Intercept execution for offline GUI testing */
+    if (isOfflineMode) {
+        g_print("Launching GUI in offline test mode...\n");
+        
+        /* Initialize the window with a mock seat assignment */
+        InitializeGUI(0);
+        UpdateTelemetryHUD(0, 1000, "Offline Test Mode");
+        ShowMainWindow();
+        
+        /* Yield execution immediately to GTK without binding network listeners */
+        gtk_main();
+        return 0;
+    }
+
+    /* 3. Block execution to collect network credentials */
     if (!PromptLoginDetails(playerName, &localSeat, playerPassword)) {
         g_print("Login sequence aborted by user. Exiting.\n");
         return 0;
     }
 
-    /* 3. Initialize TCP Stream Socket */
+    /* 4. Initialize TCP Stream Socket */
     if ((g_client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         perror("Client socket creation error");
         exit(EXIT_FAILURE);
@@ -100,7 +125,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    /* 4. Connect to Authoritative Server */
+    /* 5. Connect to Authoritative Server */
     g_print("Connecting to %s:%d as %s (Seat %d)...\n", SERVER_IP, SERVER_PORT, playerName, localSeat);
     if (connect(g_client_socket, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("Connection to server failed. Is the server running?");
@@ -108,22 +133,22 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    /* 5. Transmit Synchronous Alpha Handshake */
+    /* 6. Transmit Synchronous Alpha Handshake */
     BuildEnterMessage(outBuffer, playerName, localSeat, playerPassword);
     send(g_client_socket, outBuffer, strlen(outBuffer), 0);
 
-    /* 6. Launch the Main Presentation Layer */
+    /* 7. Launch the Main Presentation Layer */
     InitializeGUI(localSeat);
     ShowMainWindow();
 
-    /* 7. Bind the Asynchronous Network Hook */
+    /* 8. Bind the Asynchronous Network Hook */
     GIOChannel *io_channel = g_io_channel_unix_new(g_client_socket);
     g_io_channel_set_encoding(io_channel, NULL, NULL);
     g_io_channel_set_buffered(io_channel, FALSE);
     g_io_add_watch(io_channel, G_IO_IN, OnServerMessageReceived, NULL);
     g_io_channel_unref(io_channel);
 
-    /* 8. Yield Execution to GTK */
+    /* 9. Yield Execution to GTK */
     gtk_main();
 
     close(g_client_socket);

@@ -79,8 +79,8 @@ test: all
 
 # Trigger graphical interface tests
 test-gui: all
-	@echo "Initializing GTK client interface..."
-	./$(CLIENT_TARGET)
+	@echo "Initializing GTK client interface in offline mode..."
+	./$(CLIENT_TARGET) --offline
 
 # Generate compressed source archive for submission
 tar: clean
