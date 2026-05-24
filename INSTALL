@@ -1,0 +1,31 @@
+Anteater Poker - Installation Instructions
+
+//=============================================================================
+Developer Installation & Build (Source Package)
+//=============================================================================
+To compile the system from source code, execute the following:
+
+1. Extract the Source Archive:
+* tar -xvzf Poker_Alpha.src.tar.gz
+* cd poker
+
+2. Compile the Binaries:
+* make all
+
+3. Run Offline GUI Tests (verify GTK rendering without server):
+* make test-gui
+
+//=============================================================================
+Customer Installation & Execution (End-User Package)
+//=============================================================================
+The customer package contains pre-compiled binaries. No compilation is required.
+
+1. Extract the Application:
+* tar -xvzf Poker_Alpha.tar.gz
+* cd poker
+
+2. Launch the Host Server:
+* ./bin/poker_server
+
+3. Launch the Client GUI:
+* ./bin/poker_client

@@ -1,0 +1,52 @@
+Anteater Poker
+Version: Alpha Release
+Date: May 24, 2026
+
+//=============================================================================
+Project Overview
+//=============================================================================
+Anteater Poker is a networked, client-server card game developed in the C programming language.
+The application facilitates remote gameplay among friends, utilizing TCP/IP sockets for
+communication and GTK 3.0 for the graphical user interface.
+
+This version extends standard Texas Hold'em rules by integrating UCI's mascot through custom
+Anteater face cards and special action cards.
+
+//=============================================================================
+System Requirements
+//=============================================================================
+This software is designed for and verified with the following configurations:
+* Operating System: Linux
+* Compiler: GCC (C11 standard recommended)
+* Libraries: GTK 3.0
+* Build Tool: GNU Make
+
+//=============================================================================
+Execution
+//=============================================================================
+The server must be initialized before clients can connect.
+1. Launch the Server:
+* ./bin/poker_server
+2. Launch the Client:
+* ./bin/poker_client
+
+//=============================================================================
+Release History
+//=============================================================================
+May 25, 2026 - V1.0
+Alpha Release
+* Includes proper README, COPYRIGHT, INSTALL documentation
+* Bundle with Poker User Manual and Software Spec
+* Generic Poker Server & Cient UI implementation
+
+//=============================================================================
+Team Information (Team T3)
+//=============================================================================
+* Jonghyun Choi
+* Vinh Nguyen
+* Hamza Faisal
+* Richard Nguyen
+* William Kuang
+* Kun Liang
+
+This project is licensed under the MIT License - see the COPYRIGHT file for details
