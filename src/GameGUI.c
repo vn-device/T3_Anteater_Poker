@@ -19,6 +19,7 @@
 static GtkWidget *pMainWindow;
 static GtkWidget *pStatusLabel;
 static GtkWidget *pTableArea;
+static GtkWidget *pBetSpinButton;
 static int g_LocalSeat = -1;
 
 //=============================================================================
@@ -91,7 +92,6 @@ int PromptLoginDetails(char *outName, int *outSeat, char *outPassword)
             int parsedSeat = -1;
             
             if (sscanf(seatText, "%d", &parsedSeat) != 1 || parsedSeat < 0 || parsedSeat > 7) {
-                /* Spawn modal child dialog mapped to the parent login window */
                 GtkWidget *warningDialog = gtk_message_dialog_new(GTK_WINDOW(dialog),
                                                                   GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
                                                                   GTK_MESSAGE_WARNING,
@@ -101,7 +101,6 @@ int PromptLoginDetails(char *outName, int *outSeat, char *outPassword)
                 gtk_window_set_title(GTK_WINDOW(warningDialog), "Validation Error");
                 gtk_dialog_run(GTK_DIALOG(warningDialog));
                 gtk_widget_destroy(warningDialog);
-                /* Continues to next loop iteration, leaving login dialog active */
             }
             else {
                 strcpy(outName, gtk_entry_get_text(GTK_ENTRY(name_entry)));
@@ -131,14 +130,21 @@ static void OnActionButtonClicked(GtkWidget *widget, gpointer data)
     int action = GPOINTER_TO_INT(data);
     char buffer[MAX_MSG_LEN];
 
-    BuildActionMessage(buffer, g_LocalSeat, action, 50);
+    /* Dynamically fetch the wager amount from the spin button */
+    int wagerAmount = 0;
+    if (pBetSpinButton != NULL) {
+        wagerAmount = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(pBetSpinButton));
+    }
+
+    BuildActionMessage(buffer, g_LocalSeat, action, wagerAmount);
     
     if (g_client_socket != -1) {
         send(g_client_socket, buffer, strlen(buffer), 0);
         g_print("Sent to server: %s", buffer);
     }
     else {
-        g_printerr("Error: Socket disconnected. Cannot send action.\n");
+        /* Fallback trap for --offline headless testing */
+        g_print("Offline Mode: Simulated action '%d' with wager '%d'.\n", action, wagerAmount);
     }
 }
 
@@ -174,6 +180,20 @@ static void CreateAndPackActionButtons(GtkWidget *pHBox)
         GtkWidget *pButton = CreateActionButton(buttons[i].label, buttons[i].actionType);
         gtk_box_pack_start(GTK_BOX(pHBox), pButton, TRUE, TRUE, 0);
     }
+
+    /* Inject dynamic wager controls */
+    GtkWidget *pBetLabel = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(pBetLabel), "<span weight='bold'>Wager:</span>");
+    
+    /* Configures the boundary limit: 0 to 10000, incrementing by 10 */
+    pBetSpinButton = gtk_spin_button_new_with_range(0, 10000, 10);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(pBetSpinButton), 50);
+
+    /* Push the wager controls slightly to the right of the action buttons */
+    gtk_widget_set_margin_start(pBetLabel, 20);
+
+    gtk_box_pack_start(GTK_BOX(pHBox), pBetLabel, FALSE, FALSE, 5);
+    gtk_box_pack_start(GTK_BOX(pHBox), pBetSpinButton, FALSE, FALSE, 0);
 }
 
 //=============================================================================

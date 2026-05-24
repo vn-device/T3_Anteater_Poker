@@ -84,7 +84,12 @@ test-gui: all
 
 # Generate compressed source archive for submission
 tar: clean
-	@echo "Generating Poker_Alpha_src.tar.gz..."
-	tar -czvf Poker_Alpha_src.tar.gz $(SRC_DIR) doc Makefile README COPYRIGHT INSTALL
+	@echo "Generating Poker_Alpha.src.tar.gz..."
+	tar -czvf Poker_Alpha.src.tar.gz $(SRC_DIR) doc Makefile README COPYRIGHT INSTALL
 
-.PHONY: all clean test test-gui tar
+# Generate compressed customer/end-user archive
+tar-enduser: all
+	@echo "Generating Poker_Alpha.tar.gz..."
+	tar -czvf Poker_Alpha.tar.gz $(BIN_DIR) doc README COPYRIGHT INSTALL
+
+.PHONY: all clean test test-gui tar tar-enduser
