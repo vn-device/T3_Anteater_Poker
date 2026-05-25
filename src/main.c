@@ -78,6 +78,7 @@ int main(int argc, char *argv[])
     char playerPassword[MAX_NAME_LEN];
     int localSeat = -1;
     int isOfflineMode = 0;
+    int loginSuccessful = 0;
 
     /* Scan command-line arguments for the GUI bypass flag */
     for (int i = 1; i < argc; i++) {
@@ -93,62 +94,89 @@ int main(int argc, char *argv[])
     /* 2. Intercept execution for offline GUI testing */
     if (isOfflineMode) {
         g_print("Launching GUI in offline test mode...\n");
-        
-        /* Initialize the window with a mock seat assignment */
         InitializeGUI(0);
         UpdateTelemetryHUD(0, 1000, "Offline Test Mode");
         ShowMainWindow();
-        
-        /* Yield execution immediately to GTK without binding network listeners */
         gtk_main();
         return 0;
     }
 
-    /* 3. Block execution to collect network credentials */
-    if (!PromptLoginDetails(playerName, &localSeat, playerPassword)) {
-        g_print("Login sequence aborted by user. Exiting.\n");
-        return 0;
+    /* 3. Trap execution in a validation loop until the server validates the seat allocation */
+    while (!loginSuccessful) {
+        if (!PromptLoginDetails(playerName, &localSeat, playerPassword)) {
+            g_print("Login sequence aborted by user. Exiting.\n");
+            return 0;
+        }
+
+        /* Initialize TCP Stream Socket */
+        if ((g_client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+            perror("Client socket creation error");
+            exit(EXIT_FAILURE);
+        }
+
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(SERVER_PORT);
+
+        if (inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
+            perror("Invalid server IP address");
+            close(g_client_socket);
+            exit(EXIT_FAILURE);
+        }
+
+        g_print("Connecting to %s:%d as %s (Seat %d)...\n", SERVER_IP, SERVER_PORT, playerName, localSeat);
+        if (connect(g_client_socket, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+            GtkWidget *errorDialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Connection to server failed.\nIs the server active?");
+            gtk_window_set_title(GTK_WINDOW(errorDialog), "Connection Error");
+            gtk_dialog_run(GTK_DIALOG(errorDialog));
+            gtk_widget_destroy(errorDialog);
+            close(g_client_socket);
+            continue;
+        }
+
+        /* Transmit Synchronous Alpha Handshake */
+        BuildEnterMessage(outBuffer, playerName, localSeat, playerPassword);
+        send(g_client_socket, outBuffer, strlen(outBuffer), 0);
+
+        /* Suspend execution via blocking read to await authoritative server validation */
+        char respBuffer[MAX_MSG_LEN];
+        ssize_t bytes_read = read(g_client_socket, respBuffer, MAX_MSG_LEN - 1);
+        
+        if (bytes_read > 0) {
+            respBuffer[bytes_read] = '\0';
+            ParsedMessage respMsg;
+            
+            if (ParseNetworkMessage(respBuffer, &respMsg) == 0) {
+                if (respMsg.type == MSG_TYPE_OK) {
+                    /* Server successfully allocated the block; release the loop lock */
+                    loginSuccessful = 1;
+                } 
+                else if (respMsg.type == MSG_TYPE_ERROR) {
+                    /* Server rejected the handshake due to collision; terminate socket and warn user */
+                    GtkWidget *warningDialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, "%s", respMsg.payload);
+                    gtk_window_set_title(GTK_WINDOW(warningDialog), "Seat Unavailable");
+                    gtk_dialog_run(GTK_DIALOG(warningDialog));
+                    gtk_widget_destroy(warningDialog);
+                    close(g_client_socket);
+                }
+            }
+        } else {
+            g_printerr("Server dropped connection during handshake validation.\n");
+            close(g_client_socket);
+        }
     }
 
-    /* 4. Initialize TCP Stream Socket */
-    if ((g_client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Client socket creation error");
-        exit(EXIT_FAILURE);
-    }
-
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(SERVER_PORT);
-
-    if (inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
-        perror("Invalid server IP address");
-        close(g_client_socket);
-        exit(EXIT_FAILURE);
-    }
-
-    /* 5. Connect to Authoritative Server */
-    g_print("Connecting to %s:%d as %s (Seat %d)...\n", SERVER_IP, SERVER_PORT, playerName, localSeat);
-    if (connect(g_client_socket, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        perror("Connection to server failed. Is the server running?");
-        close(g_client_socket);
-        exit(EXIT_FAILURE);
-    }
-
-    /* 6. Transmit Synchronous Alpha Handshake */
-    BuildEnterMessage(outBuffer, playerName, localSeat, playerPassword);
-    send(g_client_socket, outBuffer, strlen(outBuffer), 0);
-
-    /* 7. Launch the Main Presentation Layer */
+    /* 4. Launch the Main Presentation Layer */
     InitializeGUI(localSeat);
     ShowMainWindow();
 
-    /* 8. Bind the Asynchronous Network Hook */
+    /* 5. Bind the Asynchronous Network Hook for live gameplay updates */
     GIOChannel *io_channel = g_io_channel_unix_new(g_client_socket);
     g_io_channel_set_encoding(io_channel, NULL, NULL);
     g_io_channel_set_buffered(io_channel, FALSE);
     g_io_add_watch(io_channel, G_IO_IN, OnServerMessageReceived, NULL);
     g_io_channel_unref(io_channel);
 
-    /* 9. Yield Execution to GTK */
+    /* 6. Yield Execution to GTK */
     gtk_main();
 
     close(g_client_socket);
