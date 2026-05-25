@@ -23,7 +23,7 @@ extern Table *g_pTable;
  * Halts execution and presents a modal dialog to capture network credentials.
  * @return 1 if accepted, 0 if canceled or closed.
  */
-int PromptLoginDetails(char *outName, int *outSeat, char *outPassword);
+int PromptLoginDetails(char *outName, int *outSeat, char *outPassword, char *outIP);
 
 /**
  * Initializes the GTK environment and constructs the hierarchical widgets.

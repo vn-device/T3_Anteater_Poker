@@ -19,7 +19,6 @@
 #include "GameGUI.h"
 #include "GameProtocol.h"
 
-#define SERVER_IP "127.0.0.1" 
 #define SERVER_PORT 8003
 
 int g_client_socket = -1;
@@ -74,6 +73,7 @@ int main(int argc, char *argv[])
 {
     struct sockaddr_in serv_addr;
     char outBuffer[MAX_MSG_LEN];
+    char serverIP[16];
     char playerName[MAX_NAME_LEN];
     char playerPassword[MAX_NAME_LEN];
     int localSeat = -1;
@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
 
     /* 3. Trap execution in a validation loop until the server validates the seat allocation */
     while (!loginSuccessful) {
-        if (!PromptLoginDetails(playerName, &localSeat, playerPassword)) {
+        if (!PromptLoginDetails(playerName, &localSeat, playerPassword, serverIP)) {
             g_print("Login sequence aborted by user. Exiting.\n");
             return 0;
         }
@@ -117,15 +117,18 @@ int main(int argc, char *argv[])
         serv_addr.sin_family = AF_INET;
         serv_addr.sin_port = htons(SERVER_PORT);
 
-        if (inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
-            perror("Invalid server IP address");
+        if (inet_pton(AF_INET, serverIP, &serv_addr.sin_addr) <= 0) {
+            GtkWidget *errorDialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Invalid IP Address format: '%s'", serverIP);
+            gtk_window_set_title(GTK_WINDOW(errorDialog), "Network Error");
+            gtk_dialog_run(GTK_DIALOG(errorDialog));
+            gtk_widget_destroy(errorDialog);
             close(g_client_socket);
-            exit(EXIT_FAILURE);
+            continue;
         }
 
-        g_print("Connecting to %s:%d as %s (Seat %d)...\n", SERVER_IP, SERVER_PORT, playerName, localSeat);
+        g_print("Connecting to %s:%d as %s (Seat %d)...\n", serverIP, SERVER_PORT, playerName, localSeat);
         if (connect(g_client_socket, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-            GtkWidget *errorDialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Connection to server failed.\nIs the server active?");
+            GtkWidget *errorDialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Connection to server failed.\nIs the server active at %s?", serverIP);
             gtk_window_set_title(GTK_WINDOW(errorDialog), "Connection Error");
             gtk_dialog_run(GTK_DIALOG(errorDialog));
             gtk_widget_destroy(errorDialog);

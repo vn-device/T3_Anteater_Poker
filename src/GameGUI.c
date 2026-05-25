@@ -42,11 +42,11 @@ Table *g_pTable = NULL;
 
 //=============================================================================
 
-int PromptLoginDetails(char *outName, int *outSeat, char *outPassword)
+int PromptLoginDetails(char *outName, int *outSeat, char *outPassword, char *outIP)
 {
     GtkWidget *dialog, *content_area, *grid;
-    GtkWidget *name_entry, *pass_entry, *seat_spin;
-    GtkWidget *name_label, *pass_label, *seat_label;
+    GtkWidget *ip_entry, *name_entry, *pass_entry, *seat_spin;
+    GtkWidget *ip_label, *name_label, *pass_label, *seat_label;
     int response;
     int accepted = 0;
 
@@ -67,6 +67,11 @@ int PromptLoginDetails(char *outName, int *outSeat, char *outPassword)
     gtk_container_set_border_width(GTK_CONTAINER(grid), 15);
     gtk_container_add(GTK_CONTAINER(content_area), grid);
 
+    ip_label = gtk_label_new("Server IP:");
+    ip_entry = gtk_entry_new();
+    gtk_entry_set_max_length(GTK_ENTRY(ip_entry), 15);
+    gtk_entry_set_text(GTK_ENTRY(ip_entry), "127.0.0.1");
+
     name_label = gtk_label_new("Username:");
     name_entry = gtk_entry_new();
     gtk_entry_set_max_length(GTK_ENTRY(name_entry), 31);
@@ -83,12 +88,14 @@ int PromptLoginDetails(char *outName, int *outSeat, char *outPassword)
     gtk_entry_set_max_length(GTK_ENTRY(seat_spin), 1);
     gtk_entry_set_text(GTK_ENTRY(seat_spin), "0");
 
-    gtk_grid_attach(GTK_GRID(grid), name_label, 0, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), name_entry, 1, 0, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), pass_label, 0, 1, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), pass_entry, 1, 1, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), seat_label, 0, 2, 1, 1);
-    gtk_grid_attach(GTK_GRID(grid), seat_spin, 1, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), ip_label, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), ip_entry, 1, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), name_label, 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), name_entry, 1, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), pass_label, 0, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), pass_entry, 1, 2, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), seat_label, 0, 3, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), seat_spin, 1, 3, 1, 1);
 
     gtk_widget_show_all(dialog);
 
@@ -112,6 +119,7 @@ int PromptLoginDetails(char *outName, int *outSeat, char *outPassword)
                 gtk_widget_destroy(warningDialog);
             }
             else {
+                strcpy(outIP, gtk_entry_get_text(GTK_ENTRY(ip_entry)));
                 strcpy(outName, gtk_entry_get_text(GTK_ENTRY(name_entry)));
                 strcpy(outPassword, gtk_entry_get_text(GTK_ENTRY(pass_entry)));
                 *outSeat = parsedSeat;
