@@ -1,6 +1,14 @@
-/* PokerBot.h
- * Simple Anteater Poker bot header
- */
+/******************************************************************************
+ * File: PokerBot.h
+ * Author: Team T3
+ * Date: May 25, 2026
+ * 
+ * * Description:
+ * Defines the API and configuration constants for the automated poker bot.
+ * Declares network targeting parameters, the main bot execution loop, and 
+ * decision-making intervals for synchronized gameplay.
+ *****************************************************************************/
+
 #ifndef POKERBOT_H
 #define POKERBOT_H
 

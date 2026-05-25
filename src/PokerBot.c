@@ -1,3 +1,15 @@
+/******************************************************************************
+ * File: PokerBot.c
+ * Author: Team T3
+ * Date: May 25, 2026
+ * 
+ * * Description:
+ * Implements the automated poker bot client. Establishes a localized socket 
+ * connection to the host server, parses authoritative game state updates, 
+ * and executes randomized betting actions (Fold, Check, Call, Raise) via 
+ * the network protocol.
+ *****************************************************************************/
+
 #include "PokerBot.h"
 #include "GameProtocol.h"
 #include "GameData.h"
@@ -6,6 +18,8 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <stdlib.h>
+#include <time.h>
 
 #define sleep_ms(x) usleep((x)*1000)
 #define MAX_RECV 512
@@ -50,13 +64,13 @@ static void DecideAndAct(int sock, int seat)
 int RunPokerBot(const char *name, const char *password)
 {
     struct sockaddr_in serv;
-    SocketType sock;
+    int sock;
     char buf[MAX_RECV];
     int seat = -1;
 
     srand((unsigned)time(NULL));
     sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == INVALID_SOCKET_FD) {
+    if (sock < 0) {
         perror("socket");
         return 1;
     }
@@ -64,22 +78,16 @@ int RunPokerBot(const char *name, const char *password)
     memset(&serv, 0, sizeof(serv));
     serv.sin_family = AF_INET;
     serv.sin_port = htons(BOT_SERVER_PORT);
-        if (inet_pton(AF_INET, BOT_SERVER_IP, &serv.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, BOT_SERVER_IP, &serv.sin_addr) <= 0) {
         perror("inet_pton");
-    #ifdef _WIN32
-        closesocket(sock);
-    #else
-        close(sock);
-    #endif
+        close(sock); /* Enforcing POSIX close() */
         return 1;
-        }
+    }
 
     if (connect(sock, (struct sockaddr *)&serv, sizeof(serv)) < 0) {
         perror("connect");
-
-    close(sock);
-
-    return 1;
+        close(sock);
+        return 1;
     }
     printf("Connected to server. Attempting to take an open seat...\n");
 
@@ -115,12 +123,11 @@ int RunPokerBot(const char *name, const char *password)
                 }
             }
         }
-        /* no response or not OK, try next seat */
     }
 
     if (seat < 0) {
         printf("No seat available or join failed. Exiting.\n");
-        closesocket(sock);
+        close(sock); /* Enforcing POSIX close() */
         return 1;
     }
     int isMyTurn = 0;
@@ -183,4 +190,3 @@ int main(int argc, char *argv[])
     if (argc > 2) pass = argv[2];
     return RunPokerBot(name, pass);
 }
-

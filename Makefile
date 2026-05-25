@@ -1,10 +1,10 @@
 #==============================================================================
 # File: Makefile
 # Author: Team T3
-# Date: May 24, 2026
+# Date: May 25, 2026
 # Description:
 # Top-level build automation. Delegates compilation to the src/ directory
-# and manages archive packaging for the Alpha Release.
+# and manages archive packaging for the Beta Release.
 #==============================================================================
 
 # Default target creates the binary folder and delegates to the lower Makefile
@@ -20,7 +20,7 @@ clean:
 # Trigger headless logic/server tests
 test: all
 	@echo "Initializing headless server test..."
-	./bin/poker_server
+	./bin/poker_server --self-test
 
 # Trigger graphical interface tests
 test-gui: all
@@ -29,12 +29,12 @@ test-gui: all
 
 # Generate compressed source archive for submission
 tar: all
-	@echo "Generating Poker_Alpha.src.tar.gz..."
-	tar -czvf Poker_Alpha.src.tar.gz src bin doc Makefile README COPYRIGHT INSTALL
+	@echo "Generating Poker_Beta_src.tar.gz..."
+	tar -czvf Poker_Beta_src.tar.gz src bin doc Makefile README COPYRIGHT INSTALL
 
 # Generate compressed customer/end-user archive
 tar-enduser: all
-	@echo "Generating Poker_Alpha.tar.gz..."
-	tar -czvf Poker_Alpha.tar.gz bin doc README COPYRIGHT INSTALL
+	@echo "Generating Poker_Beta.tar.gz..."
+	tar -czvf Poker_Beta.tar.gz bin doc README COPYRIGHT INSTALL
 
 .PHONY: all clean test test-gui tar tar-enduser
