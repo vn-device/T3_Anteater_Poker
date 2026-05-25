@@ -20,7 +20,13 @@ static GtkWidget *pMainWindow;
 static GtkWidget *pStatusLabel;
 static GtkWidget *pTableArea;
 static GtkWidget *pBetSpinButton;
+static GtkWidget *pButtonFold  = NULL;
+static GtkWidget *pButtonCheck = NULL;
+static GtkWidget *pButtonCall  = NULL;
+static GtkWidget *pButtonRaise = NULL;
 static int g_LocalSeat = -1;
+Table *g_pTable = NULL;
+
 
 //=============================================================================
 
@@ -30,6 +36,9 @@ static int g_LocalSeat = -1;
 #define TABLE_AREA_HEIGHT 450
 #define WINDOW_DEFAULT_WIDTH 800
 #define WINDOW_DEFAULT_HEIGHT 450
+#define CARD_WIDTH   70
+#define CARD_HEIGHT  100
+#define CARD_SPACING 10
 
 //=============================================================================
 
@@ -122,6 +131,15 @@ int PromptLoginDetails(char *outName, int *outSeat, char *outPassword)
     return accepted;
 }
 
+void SetActionButtonsSensitive(gboolean sensitive)
+{
+    if (pButtonFold)    gtk_widget_set_sensitive(pButtonFold,    sensitive);
+    if (pButtonCheck)   gtk_widget_set_sensitive(pButtonCheck,   sensitive);
+    if (pButtonCall)    gtk_widget_set_sensitive(pButtonCall,    sensitive);
+    if (pButtonRaise)   gtk_widget_set_sensitive(pButtonRaise,   sensitive);
+    if (pBetSpinButton) gtk_widget_set_sensitive(pBetSpinButton, sensitive);
+}
+
 //=============================================================================
 
 static void OnActionButtonClicked(GtkWidget *widget, gpointer data)
@@ -150,81 +168,91 @@ static void OnActionButtonClicked(GtkWidget *widget, gpointer data)
 
 //=============================================================================
 
-static GtkWidget* CreateActionButton(const char* label, int actionType)
-{
-    if (label == NULL) return NULL;
-
-    GtkWidget *pButton = gtk_button_new_with_label(label);
-    g_signal_connect(pButton, "clicked", G_CALLBACK(OnActionButtonClicked), 
-                     GINT_TO_POINTER(actionType));
-    return pButton;
-}
-
-//=============================================================================
-
 static void CreateAndPackActionButtons(GtkWidget *pHBox)
 {
     if (pHBox == NULL) return;
-    
-    const struct {
-        const char *label;
-        int actionType;
-    } buttons[] = {
-        {"FOLD", PLAYER_ACTION_FOLD},
-        {"CHECK", PLAYER_ACTION_CHECK},
-        {"CALL", PLAYER_ACTION_CALL},
-        {"RAISE", PLAYER_ACTION_RAISE}
-    };
-    
-    for (int i = 0; i < 4; i++) {
-        GtkWidget *pButton = CreateActionButton(buttons[i].label, buttons[i].actionType);
-        gtk_box_pack_start(GTK_BOX(pHBox), pButton, TRUE, TRUE, 0);
-    }
 
-    /* Inject dynamic wager controls */
+    pButtonFold  = gtk_button_new_with_label("FOLD");
+    pButtonCheck = gtk_button_new_with_label("CHECK");
+    pButtonCall  = gtk_button_new_with_label("CALL");
+    pButtonRaise = gtk_button_new_with_label("RAISE");
+
+    g_signal_connect(pButtonFold,  "clicked", G_CALLBACK(OnActionButtonClicked),
+                     GINT_TO_POINTER(PLAYER_ACTION_FOLD));
+    g_signal_connect(pButtonCheck, "clicked", G_CALLBACK(OnActionButtonClicked),
+                     GINT_TO_POINTER(PLAYER_ACTION_CHECK));
+    g_signal_connect(pButtonCall,  "clicked", G_CALLBACK(OnActionButtonClicked),
+                     GINT_TO_POINTER(PLAYER_ACTION_CALL));
+    g_signal_connect(pButtonRaise, "clicked", G_CALLBACK(OnActionButtonClicked),
+                     GINT_TO_POINTER(PLAYER_ACTION_RAISE));
+
+    gtk_box_pack_start(GTK_BOX(pHBox), pButtonFold,  TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(pHBox), pButtonCheck, TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(pHBox), pButtonCall,  TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX(pHBox), pButtonRaise, TRUE, TRUE, 0);
+
     GtkWidget *pBetLabel = gtk_label_new(NULL);
     gtk_label_set_markup(GTK_LABEL(pBetLabel), "<span weight='bold'>Wager:</span>");
-    
-    /* Configures the boundary limit: 0 to 10000, incrementing by 10 */
     pBetSpinButton = gtk_spin_button_new_with_range(0, 10000, 10);
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(pBetSpinButton), 50);
-
-    /* Push the wager controls slightly to the right of the action buttons */
     gtk_widget_set_margin_start(pBetLabel, 20);
-
-    gtk_box_pack_start(GTK_BOX(pHBox), pBetLabel, FALSE, FALSE, 5);
+    gtk_box_pack_start(GTK_BOX(pHBox), pBetLabel,      FALSE, FALSE, 5);
     gtk_box_pack_start(GTK_BOX(pHBox), pBetSpinButton, FALSE, FALSE, 0);
+
+    /* Start greyed out — enabled only when server signals your turn */
+    SetActionButtonsSensitive(FALSE);
 }
 
 //=============================================================================
 
-static void DrawCard(cairo_t *cr, int x, int y, int width, int height, char suit, int rank)
+static void DrawCard(cairo_t *cr, int x, int y, int width, int height,
+                     char suit, int rank)
 {
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_rectangle(cr, x, y, width, height);
-    cairo_fill_preserve(cr);
-    
+    /* Border — drawn for both face and back */
     cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
     cairo_set_line_width(cr, 2.0);
+    cairo_rectangle(cr, x, y, width, height);
     cairo_stroke(cr);
 
-    if (rank == 0) return;
+    /* ── CARD BACK: rank == 0 && suit == 0 ── */
+    if (rank == 0 && suit == 0) {
+        cairo_set_source_rgb(cr, 0.10, 0.18, 0.45);
+        cairo_rectangle(cr, x + 1, y + 1, width - 2, height - 2);
+        cairo_fill(cr);
+
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.15);
+        cairo_set_line_width(cr, 1.0);
+        for (int dx = 0; dx < width; dx += 8) {
+            cairo_move_to(cr, x + dx, y);
+            cairo_line_to(cr, x + dx, y + height);
+        }
+        for (int dy = 0; dy < height; dy += 8) {
+            cairo_move_to(cr, x,         y + dy);
+            cairo_line_to(cr, x + width, y + dy);
+        }
+        cairo_stroke(cr);
+        return;
+    }
+
+    /* ── CARD FACE ── */
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_rectangle(cr, x + 1, y + 1, width - 2, height - 2);
+    cairo_fill(cr);
+
+    if (rank == 0) return;  /* blank white face (original fallback) */
 
     if (suit == 'H' || suit == 'D') {
         cairo_set_source_rgb(cr, 0.8, 0.1, 0.1);
-    }
-    else if (suit == 'N') {
+    } else if (suit == 'N') {
         cairo_set_source_rgb(cr, 0.5, 0.0, 0.5);
-    }
-    else {
+    } else {
         cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
     }
 
     char rankStr[8];
     if (rank >= 2 && rank <= 10) {
         snprintf(rankStr, sizeof(rankStr), "%d", rank);
-    }
-    else {
+    } else {
         switch (rank) {
             case 11: strcpy(rankStr, "J");    break;
             case 12: strcpy(rankStr, "Q");    break;
@@ -247,10 +275,8 @@ static void DrawCard(cairo_t *cr, int x, int y, int width, int height, char suit
 
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size(cr, 16);
-
     cairo_move_to(cr, x + 5, y + 20);
     cairo_show_text(cr, rankStr);
-    
     cairo_move_to(cr, x + 5, y + 40);
     cairo_show_text(cr, suitStr);
 }
@@ -262,27 +288,56 @@ static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
     cairo_set_source_rgb(cr, 0.180, 0.545, 0.341);
     cairo_paint(cr);
 
-    int card_width = 70;
-    int card_height = 100;
-    int spacing = 10;
-    
-    int comm_total_width = (5 * card_width) + (4 * spacing);
-    int comm_start_x = (TABLE_AREA_WIDTH - comm_total_width) / 2;
-    int comm_start_y = (TABLE_AREA_HEIGHT - card_height) / 2 - 30;
+    int comm_total_width = (5 * CARD_WIDTH) + (4 * CARD_SPACING);
+    int comm_start_x = (TABLE_AREA_WIDTH  - comm_total_width) / 2;
+    int comm_start_y = (TABLE_AREA_HEIGHT - CARD_HEIGHT) / 2 - 30;
 
-    for (int i = 0; i < 5; i++) {
-        char demoSuit = (i % 2 == 0) ? 'S' : 'H'; 
-        int demoRank = 10 + i; 
-        DrawCard(cr, comm_start_x + (i * (card_width + spacing)), comm_start_y, 
-                 card_width, card_height, demoSuit, demoRank);
+    int revealedCount = 0;
+    if (g_pTable != NULL) {
+        switch (g_pTable->state) {
+            case GAME_STATE_FLOP:     revealedCount = 3; break;
+            case GAME_STATE_TURN:     revealedCount = 4; break;
+            case GAME_STATE_RIVER:
+            case GAME_STATE_SHOWDOWN: revealedCount = 5; break;
+            default:                  revealedCount = 0; break;
+        }
     }
 
-    int hole_total_width = (2 * card_width) + spacing;
-    int hole_start_x = (TABLE_AREA_WIDTH - hole_total_width) / 2;
-    int hole_start_y = TABLE_AREA_HEIGHT - card_height - 20;
+    for (int i = 0; i < 5; i++) {
+        int cx = comm_start_x + i * (CARD_WIDTH + CARD_SPACING);
+        if (g_pTable != NULL && i < revealedCount) {
+            Card c = g_pTable->community[i];
+            DrawCard(cr, cx, comm_start_y, CARD_WIDTH, CARD_HEIGHT, c.suit, c.rank);
+        } else {
+            DrawCard(cr, cx, comm_start_y, CARD_WIDTH, CARD_HEIGHT, 0, 0);
+        }
+    }
 
-    DrawCard(cr, hole_start_x, hole_start_y, card_width, card_height, 'C', 14);
-    DrawCard(cr, hole_start_x + card_width + spacing, hole_start_y, card_width, card_height, 'S', 15);
+    int hole_total_width = (2 * CARD_WIDTH) + CARD_SPACING;
+    int hole_start_x = (TABLE_AREA_WIDTH - hole_total_width) / 2;
+    int hole_start_y = TABLE_AREA_HEIGHT - CARD_HEIGHT - 20;
+
+    if (g_pTable != NULL && g_LocalSeat >= 0 && g_LocalSeat < MAX_PLAYERS) {
+        Player *me = &g_pTable->players[g_LocalSeat];
+        if (g_pTable->state >= GAME_STATE_PRE_FLOP) {
+            DrawCard(cr, hole_start_x, hole_start_y,
+                     CARD_WIDTH, CARD_HEIGHT,
+                     me->hand[0].suit, me->hand[0].rank);
+            DrawCard(cr, hole_start_x + CARD_WIDTH + CARD_SPACING, hole_start_y,
+                     CARD_WIDTH, CARD_HEIGHT,
+                     me->hand[1].suit, me->hand[1].rank);
+        } else {
+            DrawCard(cr, hole_start_x, hole_start_y,
+                     CARD_WIDTH, CARD_HEIGHT, 0, 0);
+            DrawCard(cr, hole_start_x + CARD_WIDTH + CARD_SPACING, hole_start_y,
+                     CARD_WIDTH, CARD_HEIGHT, 0, 0);
+        }
+    } else {
+        DrawCard(cr, hole_start_x, hole_start_y,
+                 CARD_WIDTH, CARD_HEIGHT, 0, 0);
+        DrawCard(cr, hole_start_x + CARD_WIDTH + CARD_SPACING, hole_start_y,
+                 CARD_WIDTH, CARD_HEIGHT, 0, 0);
+    }
 
     return FALSE;
 }

@@ -12,7 +12,10 @@
 #ifndef GAMEGUI_H
 #define GAMEGUI_H
 
+#include "GameData.h"
 #include <gtk/gtk.h>
+
+extern Table *g_pTable;
 
 //=============================================================================
 
@@ -42,6 +45,8 @@ void UpdateTelemetryHUD(int pot, int points, const char *statusMsg);
  * Forces the GTK drawing area to invalidate and redraw the poker table.
  */
 void TriggerTableRedraw(void);
+
+void SetActionButtonsSensitive(gboolean sensitive);
 
 //=============================================================================
 
