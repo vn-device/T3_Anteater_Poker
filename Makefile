@@ -20,7 +20,7 @@ clean:
 # Trigger headless logic/server tests
 test: all
 	@echo "Initializing headless server test..."
-	./bin/poker_server
+	./bin/poker_server --self-test
 
 # Trigger graphical interface tests
 test-gui: all
