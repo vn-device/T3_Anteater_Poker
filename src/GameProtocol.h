@@ -22,6 +22,8 @@
 #define CMD_ERROR  "ERROR"
 #define CMD_ACTION "ACTION"
 #define CMD_UPDATE "UPDATE"
+#define CMD_HOST   "HOST"
+#define CMD_SETUP  "SETUP"
 
 /* Network Action Type Constants */
 #define ACTION_TYPE_FOLD  1
@@ -40,7 +42,9 @@ typedef enum {
     MSG_TYPE_OK,
     MSG_TYPE_ERROR,
     MSG_TYPE_ACTION,
-    MSG_TYPE_UPDATE
+    MSG_TYPE_UPDATE,
+    MSG_TYPE_HOST,
+    MSG_TYPE_SETUP
 } MSG_TYPE;
 
 /**
@@ -80,6 +84,16 @@ void BuildErrorMessage(char* buffer, const char* errorMsg);
  * Serializes a client action (FOLD, CHECK, CALL, RAISE) to the server.
  */
 void BuildActionMessage(char* buffer, int seat, int actionType, int amount);
+
+/**
+ * Serializes a server message appointing a player as the Lobby Host.
+ */
+void BuildHostMessage(char* buffer);
+
+/**
+ * Serializes a lobby host configuration message specifying max players for the game.
+ */
+void BuildSetupMessage(char* buffer, int maxPlayers);
 
 //=============================================================================
 

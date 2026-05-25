@@ -74,6 +74,21 @@ int ParseNetworkMessage(const char* rawStr, ParsedMessage* pMsg)
         }
         return 0;
     }
+    else if (strcmp(cmd, CMD_HOST) == 0) {
+        pMsg->type = MSG_TYPE_HOST;
+        
+        /* Expected: HOST (no additional parameters) */
+        return 0;
+    }
+    else if (strcmp(cmd, CMD_SETUP) == 0) {
+        pMsg->type = MSG_TYPE_SETUP;
+        
+        /* Expected: SETUP MAXPLAYERS <count> */
+        if (sscanf(rawStr, "SETUP MAXPLAYERS %d", &pMsg->seat) < 1) {
+            return -1;
+        }
+        return 0;
+    }
 
     return -1; /* Unrecognized command */
 }
@@ -113,6 +128,24 @@ void BuildActionMessage(char* buffer, int seat, int actionType, int amount)
     if (buffer == NULL) return;
     
     snprintf(buffer, MAX_MSG_LEN, "ACTION SEAT %d TYPE %d AMOUNT %d\n", seat, actionType, amount);
+}
+
+//=============================================================================
+
+void BuildHostMessage(char* buffer)
+{
+    if (buffer == NULL) return;
+    
+    snprintf(buffer, MAX_MSG_LEN, "HOST\n");
+}
+
+//=============================================================================
+
+void BuildSetupMessage(char* buffer, int maxPlayers)
+{
+    if (buffer == NULL) return;
+    
+    snprintf(buffer, MAX_MSG_LEN, "SETUP MAXPLAYERS %d\n", maxPlayers);
 }
 
 //=============================================================================
