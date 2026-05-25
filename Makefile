@@ -20,7 +20,7 @@ clean:
 # Trigger headless logic/server tests
 test: all
 	@echo "Initializing headless server test..."
-	./bin/poker_server --self-test
+	./bin/poker_server
 
 # Trigger graphical interface tests
 test-gui: all
@@ -28,9 +28,9 @@ test-gui: all
 	./bin/poker_client --offline
 
 # Generate compressed source archive for submission
-tar: clean
+tar: all
 	@echo "Generating Poker_Alpha.src.tar.gz..."
-	tar -czvf Poker_Alpha.src.tar.gz src doc Makefile README COPYRIGHT INSTALL
+	tar -czvf Poker_Alpha.src.tar.gz src bin doc Makefile README COPYRIGHT INSTALL
 
 # Generate compressed customer/end-user archive
 tar-enduser: all
