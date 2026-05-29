@@ -27,6 +27,13 @@ test-gui: all
 	@echo "Initializing GTK client interface in offline mode..."
 	./bin/poker_client --offline
 
+# Trigger client-server communication test
+test-comm: all
+	@echo "Initializing client-server communication test..."
+	./bin/poker_server &
+	sleep 1
+	./bin/poker_bot TestBot botpass; kill %1
+
 # Generate compressed source archive for submission
 tar: all
 	@echo "Generating Poker_Beta_src.tar.gz..."
