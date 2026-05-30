@@ -1,13 +1,13 @@
 /******************************************************************************
  * File: main.c
  * Author: Team T3
- * Date: May 23, 2026
+ * Date: May 30, 2026
  * 
  * * Description:
  * Entry point for the Anteater Poker client application. Captures 
  * local user credentials via a modal dialog prior to establishing 
  * the TCP socket connection and spawning the asynchronous GIO loop.
- * Supports an --offline command-line flag for headless GUI testing.
+ * Supports --offline for GUI testing and --test-comm for headless CI/CD.
  *****************************************************************************/
 
 #include <stdio.h>
@@ -78,20 +78,59 @@ int main(int argc, char *argv[])
     char playerPassword[MAX_NAME_LEN];
     int localSeat = -1;
     int isOfflineMode = 0;
+    int isTestComm = 0;
     int loginSuccessful = 0;
 
-    /* Scan command-line arguments for the GUI bypass flag */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--offline") == 0) {
             isOfflineMode = 1;
-            break;
+        }
+        else if (strcmp(argv[i], "--test-comm") == 0) {
+            isTestComm = 1;
         }
     }
 
-    /* 1. Initialize GTK first to enable rendering of the credential dialog */
+    /* Intercept headless communication test before X11/GTK initialization */
+    if (isTestComm) {
+        printf("[TestClient] Initiating headless protocol verification...\n");
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) {
+            perror("[TestClient] Socket failure");
+            return EXIT_FAILURE;
+        }
+
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(SERVER_PORT);
+        inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
+
+        printf("[TestClient] Connecting to 127.0.0.1:%d...\n", SERVER_PORT);
+        if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+            perror("[TestClient] Server unreachable");
+            close(sock);
+            return EXIT_FAILURE;
+        }
+
+        BuildEnterMessage(outBuffer, "IntegrationBot", 0, "AnteaterTest");
+        printf("[TestClient] TX -> %s", outBuffer);
+        send(sock, outBuffer, strlen(outBuffer), 0);
+
+        char respBuffer[MAX_MSG_LEN];
+        ssize_t bytes = read(sock, respBuffer, MAX_MSG_LEN - 1);
+        if (bytes > 0) {
+            respBuffer[bytes] = '\0';
+            printf("[TestClient] RX <- %s", respBuffer);
+        }
+        else {
+            printf("[TestClient] RX <- (No Response)\n");
+        }
+
+        printf("[TestClient] Handshake verified. Terminating.\n");
+        close(sock);
+        return EXIT_SUCCESS;
+    }
+
     gtk_init(&argc, &argv);
 
-    /* 2. Intercept execution for offline GUI testing */
     if (isOfflineMode) {
         g_print("Launching GUI in offline test mode...\n");
         InitializeGUI(0);
@@ -101,14 +140,12 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    /* 3. Trap execution in a validation loop until the server validates the seat allocation */
     while (!loginSuccessful) {
         if (!PromptLoginDetails(playerName, &localSeat, playerPassword, serverIP)) {
             g_print("Login sequence aborted by user. Exiting.\n");
             return 0;
         }
 
-        /* Initialize TCP Stream Socket */
         if ((g_client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
             perror("Client socket creation error");
             exit(EXIT_FAILURE);
@@ -136,11 +173,9 @@ int main(int argc, char *argv[])
             continue;
         }
 
-        /* Transmit Synchronous Alpha Handshake */
         BuildEnterMessage(outBuffer, playerName, localSeat, playerPassword);
         send(g_client_socket, outBuffer, strlen(outBuffer), 0);
 
-        /* Suspend execution via blocking read to await authoritative server validation */
         char respBuffer[MAX_MSG_LEN];
         ssize_t bytes_read = read(g_client_socket, respBuffer, MAX_MSG_LEN - 1);
         
@@ -150,11 +185,9 @@ int main(int argc, char *argv[])
             
             if (ParseNetworkMessage(respBuffer, &respMsg) == 0) {
                 if (respMsg.type == MSG_TYPE_OK) {
-                    /* Server successfully allocated the block; release the loop lock */
                     loginSuccessful = 1;
                 } 
                 else if (respMsg.type == MSG_TYPE_ERROR) {
-                    /* Server rejected the handshake due to collision; terminate socket and warn user */
                     GtkWidget *warningDialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, "%s", respMsg.payload);
                     gtk_window_set_title(GTK_WINDOW(warningDialog), "Seat Unavailable");
                     gtk_dialog_run(GTK_DIALOG(warningDialog));
@@ -162,24 +195,22 @@ int main(int argc, char *argv[])
                     close(g_client_socket);
                 }
             }
-        } else {
+        }
+        else {
             g_printerr("Server dropped connection during handshake validation.\n");
             close(g_client_socket);
         }
     }
 
-    /* 4. Launch the Main Presentation Layer */
     InitializeGUI(localSeat);
     ShowMainWindow();
 
-    /* 5. Bind the Asynchronous Network Hook for live gameplay updates */
     GIOChannel *io_channel = g_io_channel_unix_new(g_client_socket);
     g_io_channel_set_encoding(io_channel, NULL, NULL);
     g_io_channel_set_buffered(io_channel, FALSE);
     g_io_add_watch(io_channel, G_IO_IN, OnServerMessageReceived, NULL);
     g_io_channel_unref(io_channel);
 
-    /* 6. Yield Execution to GTK */
     gtk_main();
 
     close(g_client_socket);

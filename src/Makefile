@@ -1,7 +1,7 @@
 #==============================================================================
 # File: src/Makefile
 # Author: Team T3
-# Date: May 24, 2026
+# Date: May 30, 2026
 # Description:
 # Lower-level build automation. Handles GTK dependencies, object compilation,
 # and linking executables into the parent bin/ directory.
@@ -24,7 +24,7 @@ CLIENT_TARGET = ../bin/poker_client
 # -----------------------------------------------------------------------------
 # Server Subsystem Dependencies
 # -----------------------------------------------------------------------------
-SERVER_SRCS = PokerServer.c GameData.c GameProtocol.c HandEval.c
+SERVER_SRCS = PokerServer.c PokerBot.c GameData.c GameProtocol.c HandEval.c
 SERVER_OBJS = $(SERVER_SRCS:.c=.o)
 SERVER_TARGET = ../bin/poker_server
 
@@ -40,14 +40,14 @@ $(CLIENT_TARGET): $(CLIENT_OBJS)
 
 # Link the Server executable
 $(SERVER_TARGET): $(SERVER_OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ -pthread
 
 # Compile C source files into objects
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Local object cleanup
 clean:
 	rm -f *.o
+	rm -f $(CLIENT_TARGET) $(SERVER_TARGET)
 
 .PHONY: all clean
