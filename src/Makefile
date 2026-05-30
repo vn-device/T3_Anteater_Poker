@@ -12,7 +12,7 @@ CC = gcc
 CFLAGS = -Wall -std=c11 -g `pkg-config --cflags gtk+-3.0`
 
 # Linker flags for the GTK 3.0 Client
-LDFLAGS_CLIENT = `pkg-config --libs gtk+-3.0`
+LDFLAGS_CLIENT = `pkg-config --libs gtk+-3.0` -lm
 
 # -----------------------------------------------------------------------------
 # Client Subsystem Dependencies
