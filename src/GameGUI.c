@@ -25,6 +25,8 @@ static GtkWidget *pButtonFold  = NULL;
 static GtkWidget *pButtonCheck = NULL;
 static GtkWidget *pButtonCall  = NULL;
 static GtkWidget *pButtonRaise = NULL;
+static int g_CurrentCallAmount = 0;
+static int g_CurrentMinRaise   = 0;
 static int g_LocalSeat = -1;
 Table *g_pTable = NULL;
 
@@ -147,6 +149,36 @@ int PromptLoginDetails(char *outName, int *outSeat, char *outPassword, char *out
     return accepted;
 }
 
+static void RefreshActionButtonLabels(void)
+{
+    if (!pButtonCall || !pButtonCheck || !pButtonRaise) return;
+
+    char buf[64];
+
+    if (g_CurrentCallAmount <= 0) {
+        gtk_button_set_label(GTK_BUTTON(pButtonCheck), "CHECK  (C)");
+        gtk_button_set_label(GTK_BUTTON(pButtonCall),  "CALL");
+        gtk_widget_set_sensitive(pButtonCheck, TRUE);
+        gtk_widget_set_sensitive(pButtonCall,  FALSE);
+    } else {
+        gtk_button_set_label(GTK_BUTTON(pButtonCheck), "CHECK");
+        snprintf(buf, sizeof(buf), "CALL $%d  (C)", g_CurrentCallAmount);
+        gtk_button_set_label(GTK_BUTTON(pButtonCall), buf);
+        gtk_widget_set_sensitive(pButtonCheck, FALSE);
+        gtk_widget_set_sensitive(pButtonCall,  TRUE);
+    }
+
+    snprintf(buf, sizeof(buf), "RAISE  (R)  min $%d", g_CurrentMinRaise);
+    gtk_button_set_label(GTK_BUTTON(pButtonRaise), buf);
+}
+
+void UpdateActionContext(int callAmount, int minRaise)
+{
+    g_CurrentCallAmount = callAmount;
+    g_CurrentMinRaise   = minRaise;
+    RefreshActionButtonLabels();
+}
+
 void SetActionButtonsSensitive(gboolean sensitive)
 {
     if (pButtonFold)    gtk_widget_set_sensitive(pButtonFold,    sensitive);
@@ -154,6 +186,18 @@ void SetActionButtonsSensitive(gboolean sensitive)
     if (pButtonCall)    gtk_widget_set_sensitive(pButtonCall,    sensitive);
     if (pButtonRaise)   gtk_widget_set_sensitive(pButtonRaise,   sensitive);
     if (pBetSpinButton) gtk_widget_set_sensitive(pBetSpinButton, sensitive);
+
+    if (sensitive) {
+    if (pBetSpinButton) {
+        gtk_spin_button_set_range(GTK_SPIN_BUTTON(pBetSpinButton),
+                                  g_CurrentMinRaise, 100000);
+        if (gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(pBetSpinButton))
+                < g_CurrentMinRaise)
+            gtk_spin_button_set_value(GTK_SPIN_BUTTON(pBetSpinButton),
+                                      g_CurrentMinRaise);
+    }
+    RefreshActionButtonLabels();
+    }
 }
 
 //=============================================================================
@@ -168,6 +212,20 @@ static void OnActionButtonClicked(GtkWidget *widget, gpointer data)
     int wagerAmount = 0;
     if (pBetSpinButton != NULL) {
         wagerAmount = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(pBetSpinButton));
+    }
+
+    if (action == PLAYER_ACTION_RAISE && wagerAmount < g_CurrentMinRaise) {
+        GtkWidget *warn = gtk_message_dialog_new(
+            GTK_WINDOW(pMainWindow),
+            GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
+            GTK_MESSAGE_WARNING,
+            GTK_BUTTONS_OK,
+            "Raise of $%d is below the minimum raise of $%d.",
+            wagerAmount, g_CurrentMinRaise);
+        gtk_window_set_title(GTK_WINDOW(warn), "Invalid Raise");
+        gtk_dialog_run(GTK_DIALOG(warn));
+        gtk_widget_destroy(warn);
+        return;
     }
 
     BuildActionMessage(buffer, g_LocalSeat, action, wagerAmount);
@@ -507,6 +565,49 @@ static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
 }
 
 //=============================================================================
+static gboolean OnKeyPress(GtkWidget *widget, GdkEventKey *event, gpointer data)
+{
+    (void)widget; (void)data;
+
+    switch (event->keyval) {
+        case GDK_KEY_f:
+        case GDK_KEY_F:
+            if (pButtonFold && gtk_widget_is_sensitive(pButtonFold)) {
+                gtk_button_clicked(GTK_BUTTON(pButtonFold));
+                return TRUE;
+            }
+            break;
+
+        case GDK_KEY_c:
+        case GDK_KEY_C:
+            if (g_CurrentCallAmount <= 0) {
+                if (pButtonCheck && gtk_widget_is_sensitive(pButtonCheck)) {
+                    gtk_button_clicked(GTK_BUTTON(pButtonCheck));
+                    return TRUE;
+                }
+            } else {
+                if (pButtonCall && gtk_widget_is_sensitive(pButtonCall)) {
+                    gtk_button_clicked(GTK_BUTTON(pButtonCall));
+                    return TRUE;
+                }
+            }
+            break;
+
+        case GDK_KEY_r:
+        case GDK_KEY_R:
+        case GDK_KEY_Return:
+        case GDK_KEY_KP_Enter:
+            if (pButtonRaise && gtk_widget_is_sensitive(pButtonRaise)) {
+                gtk_button_clicked(GTK_BUTTON(pButtonRaise));
+                return TRUE;
+            }
+            break;
+
+        default:
+            break;
+    }
+    return FALSE;
+}
 
 void InitializeGUI(int localSeat)
 {
@@ -519,6 +620,8 @@ void InitializeGUI(int localSeat)
     gtk_window_set_resizable(GTK_WINDOW(pMainWindow), FALSE);
 
     g_signal_connect(pMainWindow, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+    g_signal_connect(pMainWindow, "key-press-event", G_CALLBACK(OnKeyPress), NULL);
 
     GtkWidget *pVBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_container_add(GTK_CONTAINER(pMainWindow), pVBox);

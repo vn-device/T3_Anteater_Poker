@@ -48,6 +48,8 @@ void TriggerTableRedraw(void);
 
 void SetActionButtonsSensitive(gboolean sensitive);
 
+void UpdateActionContext(int callAmount, int minRaise);
+
 //=============================================================================
 
 #endif // GAMEGUI_H
