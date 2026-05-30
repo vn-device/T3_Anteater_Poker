@@ -15,6 +15,7 @@
 #include "GameGUI.h"
 #include "GameData.h"
 #include "GameProtocol.h"
+#include <math.h>
 
 static GtkWidget *pMainWindow;
 static GtkWidget *pStatusLabel;
@@ -24,6 +25,8 @@ static GtkWidget *pButtonFold  = NULL;
 static GtkWidget *pButtonCheck = NULL;
 static GtkWidget *pButtonCall  = NULL;
 static GtkWidget *pButtonRaise = NULL;
+static int g_CurrentCallAmount = 0;
+static int g_CurrentMinRaise   = 0;
 static int g_LocalSeat = -1;
 Table *g_pTable = NULL;
 
@@ -39,6 +42,13 @@ Table *g_pTable = NULL;
 #define CARD_WIDTH   70
 #define CARD_HEIGHT  100
 #define CARD_SPACING 10
+#define SEAT_ELLIPSE_RX  280  
+#define SEAT_ELLIPSE_RY  165
+#define SEAT_BADGE_W     120
+#define SEAT_BADGE_H      60
+#define SEAT_CARD_W       28
+#define SEAT_CARD_H       40
+#define SEAT_CARD_GAP      4
 
 //=============================================================================
 
@@ -139,6 +149,36 @@ int PromptLoginDetails(char *outName, int *outSeat, char *outPassword, char *out
     return accepted;
 }
 
+static void RefreshActionButtonLabels(void)
+{
+    if (!pButtonCall || !pButtonCheck || !pButtonRaise) return;
+
+    char buf[64];
+
+    if (g_CurrentCallAmount <= 0) {
+        gtk_button_set_label(GTK_BUTTON(pButtonCheck), "CHECK  (C)");
+        gtk_button_set_label(GTK_BUTTON(pButtonCall),  "CALL");
+        gtk_widget_set_sensitive(pButtonCheck, TRUE);
+        gtk_widget_set_sensitive(pButtonCall,  FALSE);
+    } else {
+        gtk_button_set_label(GTK_BUTTON(pButtonCheck), "CHECK");
+        snprintf(buf, sizeof(buf), "CALL $%d  (C)", g_CurrentCallAmount);
+        gtk_button_set_label(GTK_BUTTON(pButtonCall), buf);
+        gtk_widget_set_sensitive(pButtonCheck, FALSE);
+        gtk_widget_set_sensitive(pButtonCall,  TRUE);
+    }
+
+    snprintf(buf, sizeof(buf), "RAISE  (R)  min $%d", g_CurrentMinRaise);
+    gtk_button_set_label(GTK_BUTTON(pButtonRaise), buf);
+}
+
+void UpdateActionContext(int callAmount, int minRaise)
+{
+    g_CurrentCallAmount = callAmount;
+    g_CurrentMinRaise   = minRaise;
+    RefreshActionButtonLabels();
+}
+
 void SetActionButtonsSensitive(gboolean sensitive)
 {
     if (pButtonFold)    gtk_widget_set_sensitive(pButtonFold,    sensitive);
@@ -146,6 +186,18 @@ void SetActionButtonsSensitive(gboolean sensitive)
     if (pButtonCall)    gtk_widget_set_sensitive(pButtonCall,    sensitive);
     if (pButtonRaise)   gtk_widget_set_sensitive(pButtonRaise,   sensitive);
     if (pBetSpinButton) gtk_widget_set_sensitive(pBetSpinButton, sensitive);
+
+    if (sensitive) {
+    if (pBetSpinButton) {
+        gtk_spin_button_set_range(GTK_SPIN_BUTTON(pBetSpinButton),
+                                  g_CurrentMinRaise, 100000);
+        if (gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(pBetSpinButton))
+                < g_CurrentMinRaise)
+            gtk_spin_button_set_value(GTK_SPIN_BUTTON(pBetSpinButton),
+                                      g_CurrentMinRaise);
+    }
+    RefreshActionButtonLabels();
+    }
 }
 
 //=============================================================================
@@ -160,6 +212,20 @@ static void OnActionButtonClicked(GtkWidget *widget, gpointer data)
     int wagerAmount = 0;
     if (pBetSpinButton != NULL) {
         wagerAmount = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(pBetSpinButton));
+    }
+
+    if (action == PLAYER_ACTION_RAISE && wagerAmount < g_CurrentMinRaise) {
+        GtkWidget *warn = gtk_message_dialog_new(
+            GTK_WINDOW(pMainWindow),
+            GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
+            GTK_MESSAGE_WARNING,
+            GTK_BUTTONS_OK,
+            "Raise of $%d is below the minimum raise of $%d.",
+            wagerAmount, g_CurrentMinRaise);
+        gtk_window_set_title(GTK_WINDOW(warn), "Invalid Raise");
+        gtk_dialog_run(GTK_DIALOG(warn));
+        gtk_widget_destroy(warn);
+        return;
     }
 
     BuildActionMessage(buffer, g_LocalSeat, action, wagerAmount);
@@ -291,11 +357,170 @@ static void DrawCard(cairo_t *cr, int x, int y, int width, int height,
 
 //=============================================================================
 
+static void ComputeSeatPosition(int seatIndex, int localSeat, int *outX, int *outY)
+{
+    const int    cx    = TABLE_AREA_WIDTH  / 2;
+    const int cy = TABLE_AREA_HEIGHT / 2 - 40;   // was -20
+    const double rx    = SEAT_ELLIPSE_RX;
+    const double ry    = SEAT_ELLIPSE_RY;
+
+    int    relative = (seatIndex - localSeat + MAX_PLAYERS) % MAX_PLAYERS;
+    double angle    = (G_PI / 2.0) + (2.0 * G_PI * relative) / MAX_PLAYERS;
+
+    *outX = cx + (int)(rx * cos(angle));
+    *outY = cy + (int)(ry * sin(angle));
+}
+
+static void DrawSeat(cairo_t *cr, int cx, int cy,
+                     const Player *p, int seatIndex,
+                     gboolean isLocal, gboolean showCards,
+                     gboolean isTurn, gboolean isDealer)
+{
+    const int bw = SEAT_BADGE_W;
+    const int bh = SEAT_BADGE_H;
+    const int bx = cx - bw / 2;
+    const int by = cy - bh / 2;
+
+    if (p == NULL || p->name[0] == '\0') {
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.25);
+        cairo_rectangle(cr, bx, by, bw, bh);
+        cairo_fill(cr);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.3);
+        cairo_set_line_width(cr, 1.0);
+        cairo_rectangle(cr, bx, by, bw, bh);
+        cairo_stroke(cr);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_font_size(cr, 10);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.4);
+        char emptyLabel[16];
+        snprintf(emptyLabel, sizeof(emptyLabel), "Seat %d", seatIndex);
+        cairo_move_to(cr, bx + 8, by + bh / 2 + 4);
+        cairo_show_text(cr, emptyLabel);
+        return;
+    }
+
+    double alpha = (p->isFolded) ? 0.35 : 0.80;
+
+    if (isLocal)
+        cairo_set_source_rgba(cr, 0.05, 0.20, 0.10, alpha);
+    else
+        cairo_set_source_rgba(cr, 0.05, 0.05, 0.15, alpha);
+    cairo_rectangle(cr, bx, by, bw, bh);
+    cairo_fill(cr);
+
+    cairo_set_line_width(cr, isLocal ? 2.5 : 1.5);
+    if (isTurn)
+        cairo_set_source_rgb(cr, 1.0, 0.85, 0.0);
+    else if (isLocal)
+        cairo_set_source_rgba(cr, 0.4, 0.9, 0.5, 0.9);
+    else
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.4);
+    cairo_rectangle(cr, bx, by, bw, bh);
+    cairo_stroke(cr);
+
+    int cardStartX = bx + 4;
+    int cardStartY = by + 4;
+
+    if (g_pTable && g_pTable->state >= GAME_STATE_PRE_FLOP && !p->isFolded) {
+        if (showCards) {
+            DrawCard(cr, cardStartX, cardStartY,
+                     SEAT_CARD_W, SEAT_CARD_H, p->hand[0].suit, p->hand[0].rank);
+            DrawCard(cr, cardStartX + SEAT_CARD_W + SEAT_CARD_GAP, cardStartY,
+                     SEAT_CARD_W, SEAT_CARD_H, p->hand[1].suit, p->hand[1].rank);
+        } else {
+            DrawCard(cr, cardStartX, cardStartY,
+                     SEAT_CARD_W, SEAT_CARD_H, 0, 0);
+            DrawCard(cr, cardStartX + SEAT_CARD_W + SEAT_CARD_GAP, cardStartY,
+                     SEAT_CARD_W, SEAT_CARD_H, 0, 0);
+        }
+    }
+
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 10);
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    char nameBuf[16];
+    snprintf(nameBuf, sizeof(nameBuf), "%.12s", p->name);
+    cairo_move_to(cr, bx + 6, by + bh - 22);
+    cairo_show_text(cr, nameBuf);
+
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+    cairo_set_font_size(cr, 9);
+    cairo_set_source_rgba(cr, 0.8, 0.9, 0.8, 1.0);
+    char chipBuf[24];
+    snprintf(chipBuf, sizeof(chipBuf), "$%d", p->points);
+    cairo_move_to(cr, bx + 6, by + bh - 10);
+    cairo_show_text(cr, chipBuf);
+
+    if (p->isFolded) {
+        cairo_set_source_rgba(cr, 0.7, 0.1, 0.1, 0.85);
+        cairo_rectangle(cr, bx + bw - 48, by + bh - 16, 44, 13);
+        cairo_fill(cr);
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_set_font_size(cr, 8);
+        cairo_move_to(cr, bx + bw - 46, by + bh - 6);
+        cairo_show_text(cr, "FOLDED");
+    } else if (isTurn) {
+        if (isLocal) {
+            cairo_set_source_rgba(cr, 0.9, 0.75, 0.0, 0.90);
+            cairo_rectangle(cr, bx + bw - 60, by + bh - 16, 56, 13);
+            cairo_fill(cr);
+            cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+            cairo_set_font_size(cr, 8);
+            cairo_move_to(cr, bx + bw - 58, by + bh - 6);
+            cairo_show_text(cr, "YOUR TURN");
+        } else {
+            cairo_set_source_rgba(cr, 0.2, 0.4, 0.8, 0.85);
+            cairo_rectangle(cr, bx + bw - 64, by + bh - 16, 60, 13);
+            cairo_fill(cr);
+            cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+            cairo_set_font_size(cr, 8);
+            cairo_move_to(cr, bx + bw - 62, by + bh - 6);
+            cairo_show_text(cr, "THEIR TURN");
+        }
+    }
+
+    if (isDealer) {
+        int dcx = bx + bw - 9;
+        int dcy = by + 9;
+        cairo_set_source_rgb(cr, 0.95, 0.95, 0.95);
+        cairo_arc(cr, dcx, dcy, 8, 0, 2 * G_PI);
+        cairo_fill(cr);
+        cairo_set_source_rgb(cr, 0.2, 0.2, 0.2);
+        cairo_set_line_width(cr, 1.0);
+        cairo_arc(cr, dcx, dcy, 8, 0, 2 * G_PI);
+        cairo_stroke(cr);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 9);
+        cairo_move_to(cr, dcx - 4, dcy + 4);
+        cairo_show_text(cr, "D");
+    }
+}
+
 static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
 {
-    cairo_set_source_rgb(cr, 0.180, 0.545, 0.341);
+
+    cairo_set_source_rgb(cr, 0.118, 0.420, 0.255);
     cairo_paint(cr);
 
+    int cx = TABLE_AREA_WIDTH  / 2;
+    int cy = TABLE_AREA_HEIGHT / 2;
+    cairo_pattern_t *vignette = cairo_pattern_create_radial(cx, cy, 80, cx, cy, 460);
+    cairo_pattern_add_color_stop_rgba(vignette, 0.0, 0.0, 0.0, 0.0, 0.0);
+    cairo_pattern_add_color_stop_rgba(vignette, 1.0, 0.0, 0.0, 0.0, 0.45);
+    cairo_set_source(cr, vignette);
+    cairo_paint(cr);
+    cairo_pattern_destroy(vignette);
+
+    if (g_pTable != NULL && g_pTable->pot > 0) {
+    char potBuf[32];
+    snprintf(potBuf, sizeof(potBuf), "POT: $%d", g_pTable->pot);
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 13);
+    cairo_set_source_rgba(cr, 1.0, 0.95, 0.7, 0.95);
+    cairo_move_to(cr, TABLE_AREA_WIDTH / 2 - 42,
+                  TABLE_AREA_HEIGHT / 2 - 40 - SEAT_ELLIPSE_RY / 2 - 10);
+    cairo_show_text(cr, potBuf);
+    }
     int comm_total_width = (5 * CARD_WIDTH) + (4 * CARD_SPACING);
     int comm_start_x = (TABLE_AREA_WIDTH  - comm_total_width) / 2;
     int comm_start_y = (TABLE_AREA_HEIGHT - CARD_HEIGHT) / 2 - 30;
@@ -312,45 +537,77 @@ static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
     }
 
     for (int i = 0; i < 5; i++) {
-        int cx = comm_start_x + i * (CARD_WIDTH + CARD_SPACING);
+        int cardX = comm_start_x + i * (CARD_WIDTH + CARD_SPACING);
         if (g_pTable != NULL && i < revealedCount) {
             Card c = g_pTable->community[i];
-            DrawCard(cr, cx, comm_start_y, CARD_WIDTH, CARD_HEIGHT, c.suit, c.rank);
+            DrawCard(cr, cardX, comm_start_y, CARD_WIDTH, CARD_HEIGHT, c.suit, c.rank);
         } else {
-            DrawCard(cr, cx, comm_start_y, CARD_WIDTH, CARD_HEIGHT, 0, 0);
+            DrawCard(cr, cardX, comm_start_y, CARD_WIDTH, CARD_HEIGHT, 0, 0);
         }
     }
 
-    int hole_total_width = (2 * CARD_WIDTH) + CARD_SPACING;
-    int hole_start_x = (TABLE_AREA_WIDTH - hole_total_width) / 2;
-    int hole_start_y = TABLE_AREA_HEIGHT - CARD_HEIGHT - 20;
+    for (int s = 0; s < MAX_PLAYERS; s++) {
+    int sx, sy;
+    ComputeSeatPosition(s, (g_LocalSeat >= 0 ? g_LocalSeat : 0), &sx, &sy);
 
-    if (g_pTable != NULL && g_LocalSeat >= 0 && g_LocalSeat < MAX_PLAYERS) {
-        Player *me = &g_pTable->players[g_LocalSeat];
-        if (g_pTable->state >= GAME_STATE_PRE_FLOP) {
-            DrawCard(cr, hole_start_x, hole_start_y,
-                     CARD_WIDTH, CARD_HEIGHT,
-                     me->hand[0].suit, me->hand[0].rank);
-            DrawCard(cr, hole_start_x + CARD_WIDTH + CARD_SPACING, hole_start_y,
-                     CARD_WIDTH, CARD_HEIGHT,
-                     me->hand[1].suit, me->hand[1].rank);
-        } else {
-            DrawCard(cr, hole_start_x, hole_start_y,
-                     CARD_WIDTH, CARD_HEIGHT, 0, 0);
-            DrawCard(cr, hole_start_x + CARD_WIDTH + CARD_SPACING, hole_start_y,
-                     CARD_WIDTH, CARD_HEIGHT, 0, 0);
-        }
-    } else {
-        DrawCard(cr, hole_start_x, hole_start_y,
-                 CARD_WIDTH, CARD_HEIGHT, 0, 0);
-        DrawCard(cr, hole_start_x + CARD_WIDTH + CARD_SPACING, hole_start_y,
-                 CARD_WIDTH, CARD_HEIGHT, 0, 0);
+    gboolean isLocal   = (s == g_LocalSeat);
+    gboolean isTurn = (g_pTable != NULL && g_pTable->activeIdx == s);
+    gboolean isDealer = (g_pTable != NULL && g_pTable->dealerIdx == s);
+    gboolean showCards = isLocal ||
+                         (g_pTable != NULL && g_pTable->state == GAME_STATE_SHOWDOWN);
+
+    const Player *p = (g_pTable != NULL) ? &g_pTable->players[s] : NULL;
+
+    DrawSeat(cr, sx, sy, p, s, isLocal, showCards, isTurn, isDealer);
     }
 
     return FALSE;
 }
 
 //=============================================================================
+static gboolean OnKeyPress(GtkWidget *widget, GdkEventKey *event, gpointer data)
+{
+    (void)widget; (void)data;
+
+    switch (event->keyval) {
+        case GDK_KEY_f:
+        case GDK_KEY_F:
+            if (pButtonFold && gtk_widget_is_sensitive(pButtonFold)) {
+                gtk_button_clicked(GTK_BUTTON(pButtonFold));
+                return TRUE;
+            }
+            break;
+
+        case GDK_KEY_c:
+        case GDK_KEY_C:
+            if (g_CurrentCallAmount <= 0) {
+                if (pButtonCheck && gtk_widget_is_sensitive(pButtonCheck)) {
+                    gtk_button_clicked(GTK_BUTTON(pButtonCheck));
+                    return TRUE;
+                }
+            } else {
+                if (pButtonCall && gtk_widget_is_sensitive(pButtonCall)) {
+                    gtk_button_clicked(GTK_BUTTON(pButtonCall));
+                    return TRUE;
+                }
+            }
+            break;
+
+        case GDK_KEY_r:
+        case GDK_KEY_R:
+        case GDK_KEY_Return:
+        case GDK_KEY_KP_Enter:
+            if (pButtonRaise && gtk_widget_is_sensitive(pButtonRaise)) {
+                gtk_button_clicked(GTK_BUTTON(pButtonRaise));
+                return TRUE;
+            }
+            break;
+
+        default:
+            break;
+    }
+    return FALSE;
+}
 
 void InitializeGUI(int localSeat)
 {
@@ -363,6 +620,8 @@ void InitializeGUI(int localSeat)
     gtk_window_set_resizable(GTK_WINDOW(pMainWindow), FALSE);
 
     g_signal_connect(pMainWindow, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+    g_signal_connect(pMainWindow, "key-press-event", G_CALLBACK(OnKeyPress), NULL);
 
     GtkWidget *pVBox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_container_add(GTK_CONTAINER(pMainWindow), pVBox);
