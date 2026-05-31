@@ -1,7 +1,7 @@
 /******************************************************************************
  * File: PokerServer.c
  * Author: Team T3
- * Date: May 30, 2026
+ * Date: May 31, 2026
  * 
  * * Description:
  * Multi-client authoritative server utilizing select() for I/O multiplexing.
@@ -39,6 +39,7 @@ int g_ConnectedPlayers = 0;
 int g_IsGameConfigured = 0;
 int g_MaxPlayers = MAX_PLAYERS;
 int g_HostSocket = -1;
+char g_LobbyPassword[MAX_MSG_LEN] = {0};
 
 /* Game Logic State */
 static GamePhase g_GamePhase = GAME_WAITING_FOR_SETUP;
@@ -53,59 +54,81 @@ static Deck g_GameDeck;
 // GAME LOGIC FUNCTIONS
 //=============================================================================
 
-static void InitializeGameRound(void)
-{
-    printf("[Game] Initializing new round...\n");
-    
-    /* Shuffle and prepare deck */
-    CreateDeck(&g_GameDeck);
-    ShuffleDeck(&g_GameDeck);
-    
-    /* Deal hole cards to seated players */
-    DealHoleCards(&g_MasterTable, &g_GameDeck);
-    
-    for (int i = 0; i < g_MaxPlayers; i++) {
-        if (g_MasterTable.players[i].socket != -1) {
-            printf("Dealt to Seat %d (%s): %d%c, %d%c\n", i, g_MasterTable.players[i].name,
-                   g_MasterTable.players[i].hand[0].rank,
-                   g_MasterTable.players[i].hand[0].suit,
-                   g_MasterTable.players[i].hand[1].rank,
-                   g_MasterTable.players[i].hand[1].suit);
-        }
-    }
-    
-    /* Initialize betting state */
-    g_RoundPhase = GAME_STATE_PRE_FLOP;
-    g_CurrentBet = 0;
-    g_Pot = 0;
-    g_CurrentTurnSeat = 0;
-    
-    printf("[Game] Round initialized. Awaiting player actions.\n");
-}
-
 static void BroadcastGameUpdate(int client_socket)
 {
     char outBuffer[MAX_MSG_LEN];
     
-    /* Build UPDATE message with current game state */
+    /* 1. Broadcast Core Table State */
     BuildUpdateMessage(outBuffer, g_CurrentTurnSeat, g_CurrentBet, g_Pot, g_RoundPhase);
-    
     if (client_socket != -1) {
-        /* Send to specific client */
         send(client_socket, outBuffer, strlen(outBuffer), 0);
     } else {
-        /* Broadcast to all seated players */
         for (int i = 0; i < g_MaxPlayers; i++) {
-            if (g_MasterTable.players[i].socket != -1 && !g_MasterTable.players[i].isFolded) {
+            if (g_MasterTable.players[i].socket != -1) {
                 send(g_MasterTable.players[i].socket, outBuffer, strlen(outBuffer), 0);
+            }
+        }
+    }
+
+    /* 2. Broadcast Synchronized Player Profiles (Names/Chips/Status) */
+    for (int i = 0; i < g_MaxPlayers; i++) {
+        if (g_MasterTable.players[i].socket != -1 || g_MasterTable.players[i].name[0] != '\0') {
+            BuildSyncMessage(outBuffer, i, g_MasterTable.players[i].points, g_MasterTable.players[i].isFolded, g_MasterTable.players[i].name);
+            
+            if (client_socket != -1) {
+                send(client_socket, outBuffer, strlen(outBuffer), 0);
+            } else {
+                for (int j = 0; j < g_MaxPlayers; j++) {
+                    if (g_MasterTable.players[j].socket != -1) {
+                        send(g_MasterTable.players[j].socket, outBuffer, strlen(outBuffer), 0);
+                    }
+                }
+            }
+        }
+    }
+
+    /* 3. Broadcast Active Community Cards */
+    for (int i = 0; i < 5; i++) {
+        BuildCommunityMessage(outBuffer, i, g_MasterTable.community[i].rank, g_MasterTable.community[i].suit);
+        if (client_socket != -1) {
+            send(client_socket, outBuffer, strlen(outBuffer), 0);
+        } else {
+            for (int j = 0; j < g_MaxPlayers; j++) {
+                if (g_MasterTable.players[j].socket != -1) {
+                    send(g_MasterTable.players[j].socket, outBuffer, strlen(outBuffer), 0);
+                }
             }
         }
     }
 }
 
+static void InitializeGameRound(void)
+{
+    printf("[Game] Initializing new round...\n");
+    
+    CreateDeck(&g_GameDeck);
+    ShuffleDeck(&g_GameDeck);
+    DealHoleCards(&g_MasterTable, &g_GameDeck);
+    
+    /* Safely Distribute Private Cards to Specific Sockets */
+    for (int i = 0; i < g_MaxPlayers; i++) {
+        if (g_MasterTable.players[i].socket != -1) {
+            char cardBuf[MAX_MSG_LEN];
+            BuildHoleCardsMessage(cardBuf, 
+                g_MasterTable.players[i].hand[0].rank, g_MasterTable.players[i].hand[0].suit,
+                g_MasterTable.players[i].hand[1].rank, g_MasterTable.players[i].hand[1].suit);
+            send(g_MasterTable.players[i].socket, cardBuf, strlen(cardBuf), 0);
+        }
+    }
+    
+    g_RoundPhase = GAME_STATE_PRE_FLOP;
+    g_CurrentBet = 0;
+    g_Pot = 0;
+    g_CurrentTurnSeat = 0;
+}
+
 static void AdvanceTurn(void)
 {
-    /* Find next non-folded player */
     int attempts = 0;
     do {
         g_CurrentTurnSeat = (g_CurrentTurnSeat + 1) % g_MaxPlayers;
@@ -114,9 +137,10 @@ static void AdvanceTurn(void)
              g_MasterTable.players[g_CurrentTurnSeat].isFolded && 
              attempts < g_MaxPlayers);
     
-    printf("[Game] Turn advanced to Seat %d\n", g_CurrentTurnSeat);
-    BroadcastGameUpdate(-1);  /* Broadcast to all */
+    BroadcastGameUpdate(-1); 
 }
+
+//=============================================================================
 
 int main(void) 
 {
@@ -227,6 +251,7 @@ int main(void)
                     if (g_ConnectedPlayers == 0) {
                         g_IsGameConfigured = 0;
                         g_MaxPlayers = MAX_PLAYERS;
+                        memset(g_LobbyPassword, 0, MAX_MSG_LEN);
                         printf("Lobby empty. Configuration state reset.\n");
                     }
                 } 
@@ -240,26 +265,47 @@ int main(void)
                                 BuildErrorMessage(outBuffer, "Invalid seat bounds.");
                                 send(sd, outBuffer, strlen(outBuffer), 0);
                             }
-                            else if (g_MasterTable.players[msg.seat].socket != -1) {
-                                char errMsg[MAX_MSG_LEN];
-                                snprintf(errMsg, sizeof(errMsg), "Seat %d occupied.", msg.seat);
-                                BuildErrorMessage(outBuffer, errMsg);
+                            else if (g_HostSocket != -1 && strncmp(msg.payload, g_LobbyPassword, MAX_MSG_LEN) != 0) {
+                                BuildErrorMessage(outBuffer, "Incorrect lobby password.");
                                 send(sd, outBuffer, strlen(outBuffer), 0);
-                            } 
+                            }
                             else {
-                                g_MasterTable.players[msg.seat].socket = sd;
-                                strncpy(g_MasterTable.players[msg.seat].name, msg.name, MAX_NAME_LEN - 1);
-                                g_MasterTable.players[msg.seat].points = 1000;
-                                
-                                BuildOkMessage(outBuffer, msg.seat, msg.name, 1000);
-                                send(sd, outBuffer, strlen(outBuffer), 0);
-                                printf("Seat %d bound to FD %d ('%s')\n", msg.seat, sd, msg.name);
+                                /* Enforce Unique Usernames against all currently connected sockets */
+                                int isDuplicateName = 0;
+                                for (int s = 0; s < MAX_PLAYERS; s++) {
+                                    if (g_MasterTable.players[s].socket != -1) {
+                                        if (strncmp(g_MasterTable.players[s].name, msg.name, MAX_NAME_LEN) == 0) {
+                                            isDuplicateName = 1;
+                                            break;
+                                        }
+                                    }
+                                }
 
-                                if (!g_IsGameConfigured && g_HostSocket == -1) {
-                                    g_HostSocket = sd;
-                                    BuildHostMessage(outBuffer);
+                                if (isDuplicateName) {
+                                    BuildErrorMessage(outBuffer, "Username already taken.");
                                     send(sd, outBuffer, strlen(outBuffer), 0);
-                                    printf("FD %d designated Lobby Host.\n", sd);
+                                }
+                                else if (g_MasterTable.players[msg.seat].socket != -1) {
+                                    char errMsg[MAX_MSG_LEN];
+                                    snprintf(errMsg, sizeof(errMsg), "Seat %d occupied.", msg.seat);
+                                    BuildErrorMessage(outBuffer, errMsg);
+                                    send(sd, outBuffer, strlen(outBuffer), 0);
+                                } 
+                                else {
+                                    g_MasterTable.players[msg.seat].socket = sd;
+                                    strncpy(g_MasterTable.players[msg.seat].name, msg.name, MAX_NAME_LEN - 1);
+                                    g_MasterTable.players[msg.seat].points = 1000;
+                                    
+                                    BuildOkMessage(outBuffer, msg.seat, msg.name, 1000);
+                                    send(sd, outBuffer, strlen(outBuffer), 0);
+
+                                    if (!g_IsGameConfigured && g_HostSocket == -1) {
+                                        g_HostSocket = sd;
+                                        /* Persist the host's payload as the authoritative lobby password */
+                                        strncpy(g_LobbyPassword, msg.payload, MAX_MSG_LEN - 1);
+                                        BuildHostMessage(outBuffer);
+                                        send(sd, outBuffer, strlen(outBuffer), 0);
+                                    }
                                 }
                             }
                         } 
@@ -268,18 +314,14 @@ int main(void)
                             g_IsGameConfigured = 1;
                             g_GamePhase = GAME_WAITING_FOR_PLAYERS;
                             g_GameStartTime = time(NULL);
-                            printf("Host finalized layout: %d max seats.\n", g_MaxPlayers);
                         }
                         else if (msg.type == MSG_TYPE_START && sd == g_HostSocket) {
                             if (g_GamePhase == GAME_WAITING_FOR_PLAYERS) {
-                                printf("[Server] Host initiated manual start sequence.\n");
-                                
                                 int seatedCount = 0;
                                 for (int s = 0; s < g_MaxPlayers; s++) {
                                     if (g_MasterTable.players[s].socket != -1) seatedCount++;
                                 }
                                 
-                                /* If seats are empty, spawn threads */
                                 if (seatedCount < g_MaxPlayers) {
                                     for (int s = 0; s < g_MaxPlayers; s++) {
                                         if (g_MasterTable.players[s].socket == -1) {
@@ -289,11 +331,9 @@ int main(void)
                                             }
                                         }
                                     }
-                                    /* Shift to intermediate state to await bot loopback handshakes */
                                     g_GamePhase = GAME_SPAWNING_BOTS;
                                 } 
                                 else {
-                                    /* No bots needed, jump straight to active gameplay */
                                     InitializeGameRound();
                                     g_GamePhase = GAME_ACTIVE_BETTING;
                                     BroadcastGameUpdate(-1);
@@ -301,41 +341,27 @@ int main(void)
                             }
                         }
                         else {
-                            /* Process player action */
                             if (msg.type == MSG_TYPE_ACTION) {
-                                printf("FD %d [Seat %d] Action: %d (Amount: %d)\n", sd, msg.seat, msg.type, msg.amount);
-                                
-                                /* Validate action is from current turn */
                                 if (msg.seat == g_CurrentTurnSeat) {
-                                    /* Update table state based on action */
-                                    switch (msg.amount) {  /* Note: amount field encodes action type in protocol */
+                                    switch (msg.amount) {  
                                         case ACTION_TYPE_FOLD:
                                             g_MasterTable.players[msg.seat].isFolded = 1;
-                                            printf("Seat %d FOLDED\n", msg.seat);
                                             break;
                                         case ACTION_TYPE_CHECK:
-                                            printf("Seat %d CHECKED\n", msg.seat);
                                             break;
                                         case ACTION_TYPE_CALL:
                                             g_MasterTable.players[msg.seat].points -= g_CurrentBet;
                                             g_Pot += g_CurrentBet;
-                                            printf("Seat %d CALLED for %d\n", msg.seat, g_CurrentBet);
                                             break;
                                         case ACTION_TYPE_RAISE:
                                             g_Pot += msg.amount;
                                             g_MasterTable.players[msg.seat].points -= msg.amount;
                                             g_CurrentBet = msg.amount;
-                                            printf("Seat %d RAISED to %d\n", msg.seat, g_CurrentBet);
                                             break;
                                     }
-                                    
-                                    /* Advance turn to next player */
                                     AdvanceTurn();
-                                } else {
-                                    printf("Out of turn action ignored (seat %d, current turn %d)\n", msg.seat, g_CurrentTurnSeat);
                                 }
                             } else {
-                                /* Other message types */
                                 char okBuffer[MAX_MSG_LEN];
                                 BuildOkMessage(okBuffer, msg.seat, msg.name, 1000);
                                 send(sd, okBuffer, strlen(okBuffer), 0);
@@ -346,16 +372,13 @@ int main(void)
             }
         }
         
-        /* Main Execution Loop: Bot Connection Polling */
         if (g_GamePhase == GAME_SPAWNING_BOTS) {
             int seatedCount = 0;
             for (int i = 0; i < g_MaxPlayers; i++) {
                 if (g_MasterTable.players[i].socket != -1) seatedCount++;
             }
             
-            /* Once the bot pthreads complete their ENTER handshakes, deal the cards */
             if (seatedCount == g_MaxPlayers) {
-                printf("[Game] All bot threads connected. Starting %d-player round.\n", seatedCount);
                 InitializeGameRound();
                 g_GamePhase = GAME_ACTIVE_BETTING;
                 BroadcastGameUpdate(-1);

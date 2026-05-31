@@ -1,7 +1,7 @@
 /******************************************************************************
  * File: GameGUI.c
  * Author: Team T3
- * Date: May 30, 2026
+ * Date: May 31, 2026
  * 
  * * Description:
  * Implements the GTK 3.0 event-driven graphical interface. Utilizes a main 
@@ -48,6 +48,9 @@ static int   g_RoundElapsed   = 0;
 static int g_CurrentCallAmount = 0;
 static int g_CurrentMinRaise   = 0;
 static int g_LocalSeat = -1;
+
+/* Dedicated Client-Side Data Matrix */
+static Table g_ClientTable;
 Table *g_pTable = NULL;
 
 //=============================================================================
@@ -152,8 +155,6 @@ static void OnStartGameClicked(GtkWidget *widget, gpointer data)
     if (g_client_socket != -1) {
         send(g_client_socket, buffer, strlen(buffer), 0);
         g_print("Sent to server: %s", buffer);
-        
-        /* De-sensitize button immediately to prevent spamming multiple START commands */
         gtk_widget_set_sensitive(pButtonStartGame, FALSE); 
     }
 }
@@ -463,7 +464,9 @@ static void DrawSeat(cairo_t *cr, int cx, int cy,
     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
     char nameBuf[16];
     snprintf(nameBuf, sizeof(nameBuf), "%.12s", p->name);
-    cairo_move_to(cr, bx + 6, by + bh - 22);
+    
+    /* Shift Name coordinates to the right of the hole cards */
+    cairo_move_to(cr, bx + 66, by + 26);
     cairo_show_text(cr, nameBuf);
 
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
@@ -471,7 +474,9 @@ static void DrawSeat(cairo_t *cr, int cx, int cy,
     cairo_set_source_rgba(cr, 0.8, 0.9, 0.8, 1.0);
     char chipBuf[24];
     snprintf(chipBuf, sizeof(chipBuf), "$%d", p->points);
-    cairo_move_to(cr, bx + 6, by + bh - 10);
+    
+    /* Shift Chip coordinates to the right of the hole cards */
+    cairo_move_to(cr, bx + 66, by + 42);
     cairo_show_text(cr, chipBuf);
 
     if (p->isFolded) {
@@ -911,6 +916,9 @@ static GtkWidget* CreateTablePage(void)
 
 void InitializeGUI(int isOfflineMode)
 {
+    memset(&g_ClientTable, 0, sizeof(Table));
+    g_pTable = &g_ClientTable;
+
     pMainWindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(pMainWindow), "Anteater Poker");
     gtk_window_set_default_size(GTK_WINDOW(pMainWindow), WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT);
@@ -992,5 +1000,40 @@ void SyncGUIWithGameState(void)
         SetActionButtonsSensitive(TRUE);
     } else {
         SetActionButtonsSensitive(FALSE);
+    }
+}
+
+void ClientReceiveHoleCards(int r1, char s1, int r2, char s2)
+{
+    if (g_pTable && g_LocalSeat >= 0 && g_LocalSeat < MAX_PLAYERS) {
+        g_pTable->players[g_LocalSeat].hand[0].rank = r1;
+        g_pTable->players[g_LocalSeat].hand[0].suit = s1;
+        g_pTable->players[g_LocalSeat].hand[1].rank = r2;
+        g_pTable->players[g_LocalSeat].hand[1].suit = s2;
+        TriggerTableRedraw();
+    }
+}
+
+void ClientReceiveCommunityCard(int index, int rank, char suit)
+{
+    if (g_pTable && index >= 0 && index < 5) {
+        g_pTable->community[index].rank = rank;
+        g_pTable->community[index].suit = suit;
+        TriggerTableRedraw();
+    }
+}
+
+void ClientSyncSeat(int seat, const char* name, int points, int isFolded)
+{
+    if (g_pTable && seat >= 0 && seat < MAX_PLAYERS) {
+        strncpy(g_pTable->players[seat].name, name, MAX_NAME_LEN - 1);
+        g_pTable->players[seat].points = points;
+        g_pTable->players[seat].isFolded = isFolded;
+        TriggerTableRedraw();
+        
+        /* Force the Telemetry HUD to refresh once local points are loaded */
+        if (seat == g_LocalSeat) {
+            SyncGUIWithGameState();
+        }
     }
 }

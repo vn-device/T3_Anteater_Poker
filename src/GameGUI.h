@@ -1,7 +1,7 @@
 /******************************************************************************
  * File: GameGUI.h
  * Author: Team T3
- * Date: May 30, 2026
+ * Date: May 31, 2026
  * 
  * * Description:
  * Defines the graphical user interface API for the Anteater Poker client 
@@ -19,26 +19,12 @@ extern Table *g_pTable;
 
 //=============================================================================
 
-/**
- * Initializes the GTK environment, constructs the unified window hierarchy, 
- * and binds the GtkStacks for the lobby and table rendering.
- * @param isOfflineMode Flag to bypass the lobby and jump straight to the table.
- */
 void InitializeGUI(int isOfflineMode);
 
-/**
- * Renders the constructed main window and all child widgets to the screen.
- */
 void ShowMainWindow(void);
 
-/**
- * Dynamically updates the GTK label displaying the player's pot, points, and status.
- */
 void UpdateTelemetryHUD(int pot, int points, const char *statusMsg);
 
-/**
- * Forces the GTK drawing area to invalidate and redraw the poker table.
- */
 void TriggerTableRedraw(void);
 
 void SetActionButtonsSensitive(gboolean sensitive);
@@ -46,6 +32,13 @@ void SetActionButtonsSensitive(gboolean sensitive);
 void UpdateActionContext(int callAmount, int minRaise);
 
 void ResetRoundTimer(void);
+
+void SyncGUIWithGameState(void);
+
+/* Local Client Memory Hooks */
+void ClientReceiveHoleCards(int r1, char s1, int r2, char s2);
+void ClientReceiveCommunityCard(int index, int rank, char suit);
+void ClientSyncSeat(int seat, const char* name, int points, int isFolded);
 
 //=============================================================================
 

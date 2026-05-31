@@ -1,7 +1,7 @@
 /******************************************************************************
  * File: main.c
  * Author: Team T3
- * Date: May 30, 2026
+ * Date: May 31, 2026
  * 
  * * Description:
  * Entry point for the Anteater Poker client application. Isolates the 
@@ -42,12 +42,13 @@ void CleanupLocalServer(void)
 
 static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition condition, gpointer data)
 {
-    char buffer[MAX_MSG_LEN];
-    int fd = g_io_channel_unix_get_fd(source);
-    ssize_t bytes_read = read(fd, buffer, MAX_MSG_LEN - 1);
+    /* Static accumulation buffer to handle TCP stream batching & fragmentation */
+    static char stream_buffer[8192] = {0};
+    static int stream_len = 0;
     
-    /* Extract player's seat from callback data */
-    int playerSeat = (int)(intptr_t)data;
+    char read_buf[1024];
+    int fd = g_io_channel_unix_get_fd(source);
+    ssize_t bytes_read = read(fd, read_buf, sizeof(read_buf) - 1);
 
     if (bytes_read < 0) {
         perror("Socket read error");
@@ -60,53 +61,68 @@ static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition conditi
         return FALSE; 
     }
 
-    buffer[bytes_read] = '\0';
+    read_buf[bytes_read] = '\0';
     
-    ParsedMessage msg;
-    if (ParseNetworkMessage(buffer, &msg) == 0) {
-        g_print("Server Broadcast -> Type: %d, Seat: %d, Payload: %s\n", msg.type, msg.seat, msg.payload);
-        
-        switch (msg.type) {
-            case MSG_TYPE_OK:
-                UpdateTelemetryHUD(0, msg.amount, "Connected - Awaiting Game Start");
-                break;
-            case MSG_TYPE_ERROR:
-                UpdateTelemetryHUD(0, 0, msg.payload);
-                break;
-            case MSG_TYPE_UPDATE:
-                ResetRoundTimer();
-                TriggerTableRedraw();
-                
-                /* Parse turn info from UPDATE message */
-                int currentTurnSeat = msg.seat;  /* UPDATE encodes current turn in seat field */
-                
-                if (currentTurnSeat == playerSeat) {
-                    /* It's this player's turn - enable action buttons */
-                    SetActionButtonsSensitive(TRUE);
-                    char statusMsg[128];
-                    snprintf(statusMsg, sizeof(statusMsg), "Your Turn! | Pot: %d", msg.amount);
-                    UpdateTelemetryHUD(msg.amount, 0, statusMsg);
-                } else {
-                    /* Not this player's turn - disable action buttons */
-                    SetActionButtonsSensitive(FALSE);
-                    char statusMsg[128];
-                    snprintf(statusMsg, sizeof(statusMsg), "Seat %d's Turn | Pot: %d", currentTurnSeat, msg.amount);
-                    UpdateTelemetryHUD(msg.amount, 0, statusMsg);
-                }
-                break;
-            default:
-                break;
-        }
+    /* Append newly arrived bytes to the master stream buffer */
+    if (stream_len + bytes_read < (int)sizeof(stream_buffer)) {
+        strcat(stream_buffer, read_buf);
+        stream_len += bytes_read;
+    } else {
+        g_printerr("Stream buffer overflow. Flushing.\n");
+        stream_buffer[0] = '\0';
+        stream_len = 0;
+        return TRUE;
     }
-    else {
-        g_printerr("Failed to parse incoming packet: %s\n", buffer);
+
+    /* Tokenize and process EVERY complete message in the buffer */
+    char *newline_pos;
+    while ((newline_pos = strchr(stream_buffer, '\n')) != NULL) {
+        *newline_pos = '\0'; /* Isolate the single message */
+        
+        ParsedMessage msg;
+        if (ParseNetworkMessage(stream_buffer, &msg) == 0) {
+            
+            switch (msg.type) {
+                case MSG_TYPE_OK:
+                    UpdateTelemetryHUD(0, msg.amount, "Connected - Awaiting Game Start");
+                    break;
+                case MSG_TYPE_ERROR:
+                    UpdateTelemetryHUD(0, 0, msg.payload);
+                    break;
+                case MSG_TYPE_HOLECARDS:
+                    ClientReceiveHoleCards(msg.seat, msg.payload[0], msg.amount, msg.payload[1]);
+                    break;
+                case MSG_TYPE_COMMUNITY:
+                    ClientReceiveCommunityCard(msg.seat, msg.amount, msg.payload[0]);
+                    break;
+                case MSG_TYPE_SYNC:
+                    ClientSyncSeat(msg.seat, msg.name, msg.amount, msg.payload[0] == '1' ? 1 : 0);
+                    break;
+                case MSG_TYPE_UPDATE:
+                    if (g_pTable != NULL) {
+                        g_pTable->activeIdx = msg.seat;
+                        g_pTable->pot = msg.amount;
+                        g_pTable->state = atoi(msg.payload);
+                    }
+                    ResetRoundTimer();
+                    TriggerTableRedraw();
+                    SyncGUIWithGameState();
+                    break;
+                default:
+                    break;
+            }
+        }
+        
+        /* Shift the unparsed remainder of the stream left to the front of the buffer */
+        int remaining = stream_len - (newline_pos - stream_buffer) - 1;
+        memmove(stream_buffer, newline_pos + 1, remaining);
+        stream_len = remaining;
+        stream_buffer[stream_len] = '\0';
     }
 
     return TRUE; 
 }
 
-//=============================================================================
-/* PUBLIC NETWORKING HOOKS CALLED BY GAMEGUI.C CALLBACKS */
 //=============================================================================
 
 void StartNetworkListener(int playerSeat)
@@ -116,7 +132,7 @@ void StartNetworkListener(int playerSeat)
     GIOChannel *io_channel = g_io_channel_unix_new(g_client_socket);
     g_io_channel_set_encoding(io_channel, NULL, NULL);
     g_io_channel_set_buffered(io_channel, FALSE);
-    g_io_add_watch(io_channel, G_IO_IN, OnServerMessageReceived, (gpointer)(intptr_t)playerSeat);
+    g_io_add_watch(io_channel, G_IO_IN, OnServerMessageReceived, NULL);
     g_io_channel_unref(io_channel);
 }
 
@@ -127,7 +143,6 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
     char hostIP[16] = "127.0.0.1";
     char hostname[256];
     
-    /* 1. Environment Extraction & Cipher Generation */
     if (gethostname(hostname, sizeof(hostname)) == 0) {
         struct hostent *host = gethostbyname(hostname);
         if (host != NULL && host->h_addr_list[0] != NULL) {
@@ -144,7 +159,6 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
         strcpy(outRoomCode, "ERROR");
     }
 
-    /* 2. Background Daemon Spawn */
     g_server_pid = fork();
     if (g_server_pid < 0) {
         perror("Failed to launch local server");
@@ -156,10 +170,8 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
         exit(EXIT_FAILURE);
     }
 
-    /* 500ms startup threshold to ensure accept() loop binds */
     usleep(500000); 
 
-    /* 3. Loopback TCP Establishment */
     if ((g_client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return 0;
     }
@@ -173,7 +185,6 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
         return 0;
     }
 
-    /* 4. Host Setup Handshake Sequence */
     BuildEnterMessage(outBuffer, name, 0, password);
     send(g_client_socket, outBuffer, strlen(outBuffer), 0);
 
@@ -186,7 +197,6 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
         if (ParseNetworkMessage(respBuffer, &msg) == 0 && msg.type == MSG_TYPE_OK) {
             *outSeat = 0;
             
-            /* Await HOST designation packet from server */
             struct timeval tv = {1, 0}; 
             fd_set readfds;
             FD_ZERO(&readfds);
@@ -197,13 +207,8 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
                 if (bytes_read > 0) {
                     respBuffer[bytes_read] = '\0';
                     if (ParseNetworkMessage(respBuffer, &msg) == 0 && msg.type == MSG_TYPE_HOST) {
-                        
-                        /* Authorize server to finalize configuration and spawn bots */
                         BuildSetupMessage(outBuffer, maxPlayers);
                         send(g_client_socket, outBuffer, strlen(outBuffer), 0);
-                        
-                        printf("[Host] Lobby successfully established. Room Code: %s\n", outRoomCode);
-                        
                         return 1;
                     }
                 }
@@ -221,7 +226,6 @@ int PerformJoinConnection(const char *name, const char *password, const char *ro
     char outBuffer[MAX_MSG_LEN];
     char serverIP[16];
     
-    /* 1. Decoder Reversion */
     unsigned int val;
     if (sscanf(roomCode, "%08X", &val) != 1) {
         return 0;
@@ -233,7 +237,6 @@ int PerformJoinConnection(const char *name, const char *password, const char *ro
         return 0;
     }
 
-    /* 2. TCP Establishment */
     if ((g_client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return 0;
     }
@@ -247,7 +250,6 @@ int PerformJoinConnection(const char *name, const char *password, const char *ro
         return 0;
     }
 
-    /* 3. Auto-Seating Loop (The Among Us Mechanic) */
     for (int s = 0; s < MAX_PLAYERS; s++) {
         BuildEnterMessage(outBuffer, name, s, password);
         send(g_client_socket, outBuffer, strlen(outBuffer), 0);
@@ -265,7 +267,6 @@ int PerformJoinConnection(const char *name, const char *password, const char *ro
         }
     }
 
-    /* If execution escapes the loop, all seats rejected the connection */
     close(g_client_socket);
     return 0; 
 }
@@ -288,7 +289,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    /* Headless Communication Testing Bypass */
     if (isTestComm) {
         struct sockaddr_in serv_addr;
         char outBuffer[MAX_MSG_LEN];
@@ -301,29 +301,24 @@ int main(int argc, char *argv[])
         serv_addr.sin_port = htons(SERVER_PORT);
         inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr);
 
-        printf("[TestClient] Connecting to 127.0.0.1:%d...\n", SERVER_PORT);
         if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
             close(sock);
             return EXIT_FAILURE;
         }
 
         BuildEnterMessage(outBuffer, "IntegrationBot", 0, "AnteaterTest");
-        printf("[TestClient] TX -> %s", outBuffer);
         send(sock, outBuffer, strlen(outBuffer), 0);
 
         char respBuffer[MAX_MSG_LEN];
         ssize_t bytes = read(sock, respBuffer, MAX_MSG_LEN - 1);
         if (bytes > 0) {
             respBuffer[bytes] = '\0';
-            printf("[TestClient] RX <- %s", respBuffer);
         }
 
-        printf("[TestClient] Handshake verified. Terminating.\n");
         close(sock);
         return EXIT_SUCCESS;
     }
 
-    /* Master GUI Lifecycle */
     gtk_init(&argc, &argv);
     
     InitializeGUI(isOfflineMode);
