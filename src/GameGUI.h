@@ -1,12 +1,12 @@
 /******************************************************************************
  * File: GameGUI.h
  * Author: Team T3
- * Date: May 12, 2026
+ * Date: May 30, 2026
  * 
  * * Description:
  * Defines the graphical user interface API for the Anteater Poker client 
  * using GTK 3.0. Refactored to utilize a Single-Page Application (SPA) 
- * architecture via GtkStack.
+ * architecture via GtkStack. Includes integrated timer hooks.
  *****************************************************************************/
 
 #ifndef GAMEGUI_H
@@ -44,6 +44,8 @@ void TriggerTableRedraw(void);
 void SetActionButtonsSensitive(gboolean sensitive);
 
 void UpdateActionContext(int callAmount, int minRaise);
+
+void ResetRoundTimer(void);
 
 //=============================================================================
 
