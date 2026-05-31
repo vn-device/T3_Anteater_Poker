@@ -56,6 +56,10 @@ static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition conditi
             case MSG_TYPE_ERROR:
                 UpdateTelemetryHUD(0, 0, msg.payload);
                 break;
+            case MSG_TYPE_UPDATE:
+                ResetRoundTimer();
+                TriggerTableRedraw();
+                break;
             default:
                 break;
         }
