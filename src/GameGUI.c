@@ -35,6 +35,7 @@ static GtkWidget *pButtonFold  = NULL;
 static GtkWidget *pButtonCheck = NULL;
 static GtkWidget *pButtonCall  = NULL;
 static GtkWidget *pButtonRaise = NULL;
+static GtkWidget *pButtonStartGame = NULL;
 
 /* Lobby Input Pointers */
 static GtkWidget *h_name_entry, *h_pass_entry, *h_spin;
@@ -105,6 +106,10 @@ static void OnHostStartClicked(GtkWidget *widget, gpointer data)
         
         gtk_stack_set_visible_child_name(GTK_STACK(pMainStack), "page_table");
         StartNetworkListener(seat);
+
+        if (g_LocalSeat == 0 && pButtonStartGame != NULL) {
+            gtk_widget_show(pButtonStartGame);
+        }
     }
     else {
         GtkWidget *err = gtk_message_dialog_new(GTK_WINDOW(pMainWindow), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Failed to initialize Host Server.");
@@ -135,6 +140,21 @@ static void OnJoinConnectClicked(GtkWidget *widget, gpointer data)
         GtkWidget *err = gtk_message_dialog_new(GTK_WINDOW(pMainWindow), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Connection Rejected. Lobby may be full or Code is invalid.");
         gtk_dialog_run(GTK_DIALOG(err));
         gtk_widget_destroy(err);
+    }
+}
+
+static void OnStartGameClicked(GtkWidget *widget, gpointer data)
+{
+    extern int g_client_socket;
+    char buffer[MAX_MSG_LEN];
+
+    BuildStartMessage(buffer);
+    if (g_client_socket != -1) {
+        send(g_client_socket, buffer, strlen(buffer), 0);
+        g_print("Sent to server: %s", buffer);
+        
+        /* De-sensitize button immediately to prevent spamming multiple START commands */
+        gtk_widget_set_sensitive(pButtonStartGame, FALSE); 
     }
 }
 
@@ -865,6 +885,17 @@ static GtkWidget* CreateTablePage(void)
     g_signal_connect(pTableArea, "draw", G_CALLBACK(OnDrawTable), NULL);
     gtk_box_pack_start(GTK_BOX(tableVBox), pTableArea, TRUE, TRUE, 0);
 
+    /* Host Control Panel (Above the Action Buttons) */
+    pButtonStartGame = gtk_button_new_with_label("START GAME (Host Override)");
+    gtk_widget_set_margin_start(pButtonStartGame, MARGIN_BUTTON_AREA);
+    gtk_widget_set_margin_end(pButtonStartGame, MARGIN_BUTTON_AREA);
+    gtk_box_pack_start(GTK_BOX(tableVBox), pButtonStartGame, FALSE, FALSE, 5);
+    g_signal_connect(pButtonStartGame, "clicked", G_CALLBACK(OnStartGameClicked), NULL);
+    
+    /* Hide by default until network sync confirms Seat 0 */
+    gtk_widget_set_no_show_all(pButtonStartGame, TRUE);
+    gtk_widget_hide(pButtonStartGame);
+
     GtkWidget *pHBox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_widget_set_margin_start(pHBox, MARGIN_BUTTON_AREA);
     gtk_widget_set_margin_end(pHBox, MARGIN_BUTTON_AREA);
@@ -934,5 +965,32 @@ void TriggerTableRedraw(void)
 {
     if (pTableArea != NULL) {
         gtk_widget_queue_draw(pTableArea);
+    }
+}
+
+void SyncGUIWithGameState(void)
+{
+    if (g_pTable == NULL) return;
+
+    char hudMsg[128];
+    if (g_pTable->state == 0) {
+        strcpy(hudMsg, "Lobby Ready - Awaiting Host Start...");
+    } else {
+        snprintf(hudMsg, sizeof(hudMsg), "Game Active | Round Phase: %d", g_pTable->state);
+    }
+
+    UpdateTelemetryHUD(g_pTable->pot, g_pTable->players[g_LocalSeat].points, hudMsg);
+
+    /* Host Button Visibility Toggle */
+    if (g_pTable->state == 0 && g_LocalSeat == 0) {
+        gtk_widget_show(pButtonStartGame);
+    } else {
+        gtk_widget_hide(pButtonStartGame);
+    }
+
+    if (g_pTable->state != 0 && g_pTable->activeIdx == g_LocalSeat && !g_pTable->players[g_LocalSeat].isFolded) {
+        SetActionButtonsSensitive(TRUE);
+    } else {
+        SetActionButtonsSensitive(FALSE);
     }
 }

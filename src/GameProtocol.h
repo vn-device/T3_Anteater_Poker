@@ -24,6 +24,7 @@
 #define CMD_UPDATE "UPDATE"
 #define CMD_HOST   "HOST"
 #define CMD_SETUP  "SETUP"
+#define CMD_START  "START"
 
 /* Network Action Type Constants */
 #define ACTION_TYPE_FOLD  1
@@ -44,7 +45,8 @@ typedef enum {
     MSG_TYPE_ACTION,
     MSG_TYPE_UPDATE,
     MSG_TYPE_HOST,
-    MSG_TYPE_SETUP
+    MSG_TYPE_SETUP,
+    MSG_TYPE_START
 } MSG_TYPE;
 
 /**
@@ -94,6 +96,11 @@ void BuildHostMessage(char* buffer);
  * Serializes a lobby host configuration message specifying max players for the game.
  */
 void BuildSetupMessage(char* buffer, int maxPlayers);
+
+/**
+ * Serializes a host override to trigger the lobby game start and bot generation.
+ */
+void BuildStartMessage(char* buffer);
 
 /**
  * Serializes a server game state update broadcast.

@@ -30,6 +30,7 @@
 typedef enum {
     GAME_WAITING_FOR_SETUP,
     GAME_WAITING_FOR_PLAYERS,
+    GAME_SPAWNING_BOTS,
     GAME_ACTIVE_BETTING
 } GamePhase;
 
@@ -268,16 +269,34 @@ int main(void)
                             g_GamePhase = GAME_WAITING_FOR_PLAYERS;
                             g_GameStartTime = time(NULL);
                             printf("Host finalized layout: %d max seats.\n", g_MaxPlayers);
-
-                            for (int s = 0; s < g_MaxPlayers; s++) {
-                                if (g_MasterTable.players[s].socket == -1) {
-                                    pthread_t bot_tid;
-                                    if (pthread_create(&bot_tid, NULL, RunPokerBotThread, (void*)(intptr_t)s) != 0) {
-                                        perror("Thread spawn failed");
+                        }
+                        else if (msg.type == MSG_TYPE_START && sd == g_HostSocket) {
+                            if (g_GamePhase == GAME_WAITING_FOR_PLAYERS) {
+                                printf("[Server] Host initiated manual start sequence.\n");
+                                
+                                int seatedCount = 0;
+                                for (int s = 0; s < g_MaxPlayers; s++) {
+                                    if (g_MasterTable.players[s].socket != -1) seatedCount++;
+                                }
+                                
+                                /* If seats are empty, spawn threads */
+                                if (seatedCount < g_MaxPlayers) {
+                                    for (int s = 0; s < g_MaxPlayers; s++) {
+                                        if (g_MasterTable.players[s].socket == -1) {
+                                            pthread_t bot_tid;
+                                            if (pthread_create(&bot_tid, NULL, RunPokerBotThread, (void*)(intptr_t)s) == 0) {
+                                                pthread_detach(bot_tid);
+                                            }
+                                        }
                                     }
-                                    else {
-                                        pthread_detach(bot_tid);
-                                    }
+                                    /* Shift to intermediate state to await bot loopback handshakes */
+                                    g_GamePhase = GAME_SPAWNING_BOTS;
+                                } 
+                                else {
+                                    /* No bots needed, jump straight to active gameplay */
+                                    InitializeGameRound();
+                                    g_GamePhase = GAME_ACTIVE_BETTING;
+                                    BroadcastGameUpdate(-1);
                                 }
                             }
                         }
@@ -327,26 +346,19 @@ int main(void)
             }
         }
         
-        /* Auto-start game after SETUP if all players have connected */
-        if (g_GamePhase == GAME_WAITING_FOR_PLAYERS) {
+        /* Main Execution Loop: Bot Connection Polling */
+        if (g_GamePhase == GAME_SPAWNING_BOTS) {
             int seatedCount = 0;
             for (int i = 0; i < g_MaxPlayers; i++) {
                 if (g_MasterTable.players[i].socket != -1) seatedCount++;
             }
             
-            /* Start if all seats filled OR 3 seconds have passed */
-            int elapsed = time(NULL) - g_GameStartTime;
-            if (seatedCount == g_MaxPlayers || elapsed >= 3) {
-                if (seatedCount > 0) {
-                    printf("[Game] Starting! %d/%d players seated after %d seconds.\n", 
-                           seatedCount, g_MaxPlayers, elapsed);
-                    InitializeGameRound();
-                    g_GamePhase = GAME_ACTIVE_BETTING;
-                    BroadcastGameUpdate(-1);  /* Notify all players */
-                } else {
-                    printf("[Game] No players seated. Resetting.\n");
-                    g_GamePhase = GAME_WAITING_FOR_SETUP;
-                }
+            /* Once the bot pthreads complete their ENTER handshakes, deal the cards */
+            if (seatedCount == g_MaxPlayers) {
+                printf("[Game] All bot threads connected. Starting %d-player round.\n", seatedCount);
+                InitializeGameRound();
+                g_GamePhase = GAME_ACTIVE_BETTING;
+                BroadcastGameUpdate(-1);
             }
         }
     }

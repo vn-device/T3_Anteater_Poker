@@ -89,6 +89,12 @@ int ParseNetworkMessage(const char* rawStr, ParsedMessage* pMsg)
         }
         return 0;
     }
+    else if (strcmp(cmd, CMD_START) == 0) {
+        pMsg->type = MSG_TYPE_START;
+        
+        /* Expected: START (no additional parameters) */
+        return 0;
+    }
     else if (strcmp(cmd, CMD_UPDATE) == 0) {
         pMsg->type = MSG_TYPE_UPDATE;
         
@@ -158,6 +164,15 @@ void BuildSetupMessage(char* buffer, int maxPlayers)
     if (buffer == NULL) return;
     
     snprintf(buffer, MAX_MSG_LEN, "SETUP MAXPLAYERS %d\n", maxPlayers);
+}
+
+//=============================================================================
+
+void BuildStartMessage(char* buffer)
+{
+    if (buffer == NULL) return;
+    
+    snprintf(buffer, MAX_MSG_LEN, "START\n");
 }
 
 //=============================================================================
