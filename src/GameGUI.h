@@ -50,6 +50,8 @@ void SetActionButtonsSensitive(gboolean sensitive);
 
 void UpdateActionContext(int callAmount, int minRaise);
 
+void ResetRoundTimer(void);
+
 //=============================================================================
 
 #endif // GAMEGUI_H

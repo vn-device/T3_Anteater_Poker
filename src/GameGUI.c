@@ -25,6 +25,8 @@ static GtkWidget *pButtonFold  = NULL;
 static GtkWidget *pButtonCheck = NULL;
 static GtkWidget *pButtonCall  = NULL;
 static GtkWidget *pButtonRaise = NULL;
+static guint g_TimerSourceId  = 0;
+static int   g_RoundElapsed   = 0;
 static int g_CurrentCallAmount = 0;
 static int g_CurrentMinRaise   = 0;
 static int g_LocalSeat = -1;
@@ -496,6 +498,24 @@ static void DrawSeat(cairo_t *cr, int cx, int cy,
     }
 }
 
+static gboolean OnTimerTick(gpointer data)
+{
+    (void)data;
+    g_RoundElapsed++;
+    TriggerTableRedraw();
+    return G_SOURCE_CONTINUE;
+}
+
+void ResetRoundTimer(void)
+{
+    if (g_TimerSourceId != 0) {
+        g_source_remove(g_TimerSourceId);
+        g_TimerSourceId = 0;
+    }
+    g_RoundElapsed = 0;
+    g_TimerSourceId = g_timeout_add_seconds(1, OnTimerTick, NULL);
+}
+
 static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
 {
 
@@ -559,6 +579,18 @@ static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
     const Player *p = (g_pTable != NULL) ? &g_pTable->players[s] : NULL;
 
     DrawSeat(cr, sx, sy, p, s, isLocal, showCards, isTurn, isDealer);
+    }
+    
+    if (g_TimerSourceId != 0) {
+        char timerBuf[32];
+        int  mins = g_RoundElapsed / 60;
+        int  secs = g_RoundElapsed % 60;
+        snprintf(timerBuf, sizeof(timerBuf), "Round: %02d:%02d", mins, secs);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 12);
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.75);
+        cairo_move_to(cr, TABLE_AREA_WIDTH - 115, 20);
+        cairo_show_text(cr, timerBuf);
     }
 
     return FALSE;
