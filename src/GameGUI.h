@@ -5,8 +5,8 @@
  * 
  * * Description:
  * Defines the graphical user interface API for the Anteater Poker client 
- * using GTK 3.0. Declares initialization routines, window management, 
- * and dynamic telemetry updates.
+ * using GTK 3.0. Refactored to utilize a Single-Page Application (SPA) 
+ * architecture via GtkStack.
  *****************************************************************************/
 
 #ifndef GAMEGUI_H
@@ -20,16 +20,11 @@ extern Table *g_pTable;
 //=============================================================================
 
 /**
- * Halts execution and presents a modal dialog to capture network credentials.
- * @return 1 if accepted, 0 if canceled or closed.
+ * Initializes the GTK environment, constructs the unified window hierarchy, 
+ * and binds the GtkStacks for the lobby and table rendering.
+ * @param isOfflineMode Flag to bypass the lobby and jump straight to the table.
  */
-int PromptLoginDetails(char *outName, int *outSeat, char *outPassword, char *outIP);
-
-/**
- * Initializes the GTK environment and constructs the hierarchical widgets.
- * @param localSeat The seat index assigned to the client.
- */
-void InitializeGUI(int localSeat);
+void InitializeGUI(int isOfflineMode);
 
 /**
  * Renders the constructed main window and all child widgets to the screen.
