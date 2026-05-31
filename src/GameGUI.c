@@ -22,7 +22,7 @@
 /* External Networking Hooks defined in main.c */
 extern int PerformHostConnection(const char *name, const char *password, int maxPlayers, char *outRoomCode, int *outSeat);
 extern int PerformJoinConnection(const char *name, const char *password, const char *roomCode, int *outSeat);
-extern void StartNetworkListener(void);
+extern void StartNetworkListener(int playerSeat);
 
 /* Global GUI State Pointers */
 static GtkWidget *pMainWindow;
@@ -104,7 +104,7 @@ static void OnHostStartClicked(GtkWidget *widget, gpointer data)
         UpdateTelemetryHUD(0, 1000, hudMsg);
         
         gtk_stack_set_visible_child_name(GTK_STACK(pMainStack), "page_table");
-        StartNetworkListener();
+        StartNetworkListener(seat);
     }
     else {
         GtkWidget *err = gtk_message_dialog_new(GTK_WINDOW(pMainWindow), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Failed to initialize Host Server.");
@@ -129,7 +129,7 @@ static void OnJoinConnectClicked(GtkWidget *widget, gpointer data)
         UpdateTelemetryHUD(0, 1000, hudMsg);
         
         gtk_stack_set_visible_child_name(GTK_STACK(pMainStack), "page_table");
-        StartNetworkListener();
+        StartNetworkListener(seat);
     }
     else {
         GtkWidget *err = gtk_message_dialog_new(GTK_WINDOW(pMainWindow), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Connection Rejected. Lobby may be full or Code is invalid.");

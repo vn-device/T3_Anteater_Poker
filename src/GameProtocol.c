@@ -89,6 +89,18 @@ int ParseNetworkMessage(const char* rawStr, ParsedMessage* pMsg)
         }
         return 0;
     }
+    else if (strcmp(cmd, CMD_UPDATE) == 0) {
+        pMsg->type = MSG_TYPE_UPDATE;
+        
+        /* Expected: UPDATE <currentTurnSeat> <currentBet> <pot> <roundPhase> */
+        int roundPhase = 0;
+        if (sscanf(rawStr, "UPDATE %d %d %d %d", &pMsg->seat, &pMsg->amount, &roundPhase, &roundPhase) < 4) {
+            return -1;
+        }
+        /* Store roundPhase in payload for client use if needed */
+        snprintf(pMsg->payload, MAX_MSG_LEN, "%d", roundPhase);
+        return 0;
+    }
 
     return -1; /* Unrecognized command */
 }
@@ -146,6 +158,15 @@ void BuildSetupMessage(char* buffer, int maxPlayers)
     if (buffer == NULL) return;
     
     snprintf(buffer, MAX_MSG_LEN, "SETUP MAXPLAYERS %d\n", maxPlayers);
+}
+
+//=============================================================================
+
+void BuildUpdateMessage(char* buffer, int currentTurnSeat, int currentBet, int pot, int roundPhase)
+{
+    if (buffer == NULL) return;
+    
+    snprintf(buffer, MAX_MSG_LEN, "UPDATE %d %d %d %d\n", currentTurnSeat, currentBet, pot, roundPhase);
 }
 
 //=============================================================================

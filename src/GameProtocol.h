@@ -95,6 +95,11 @@ void BuildHostMessage(char* buffer);
  */
 void BuildSetupMessage(char* buffer, int maxPlayers);
 
+/**
+ * Serializes a server game state update broadcast.
+ */
+void BuildUpdateMessage(char* buffer, int currentTurnSeat, int currentBet, int pot, int roundPhase);
+
 //=============================================================================
 
 #endif // GAMEPROTOCOL_H

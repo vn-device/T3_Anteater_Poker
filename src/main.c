@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <stdint.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <signal.h>
@@ -44,6 +45,9 @@ static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition conditi
     char buffer[MAX_MSG_LEN];
     int fd = g_io_channel_unix_get_fd(source);
     ssize_t bytes_read = read(fd, buffer, MAX_MSG_LEN - 1);
+    
+    /* Extract player's seat from callback data */
+    int playerSeat = (int)(intptr_t)data;
 
     if (bytes_read < 0) {
         perror("Socket read error");
@@ -72,6 +76,23 @@ static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition conditi
             case MSG_TYPE_UPDATE:
                 ResetRoundTimer();
                 TriggerTableRedraw();
+                
+                /* Parse turn info from UPDATE message */
+                int currentTurnSeat = msg.seat;  /* UPDATE encodes current turn in seat field */
+                
+                if (currentTurnSeat == playerSeat) {
+                    /* It's this player's turn - enable action buttons */
+                    SetActionButtonsSensitive(TRUE);
+                    char statusMsg[128];
+                    snprintf(statusMsg, sizeof(statusMsg), "Your Turn! | Pot: %d", msg.amount);
+                    UpdateTelemetryHUD(msg.amount, 0, statusMsg);
+                } else {
+                    /* Not this player's turn - disable action buttons */
+                    SetActionButtonsSensitive(FALSE);
+                    char statusMsg[128];
+                    snprintf(statusMsg, sizeof(statusMsg), "Seat %d's Turn | Pot: %d", currentTurnSeat, msg.amount);
+                    UpdateTelemetryHUD(msg.amount, 0, statusMsg);
+                }
                 break;
             default:
                 break;
@@ -88,14 +109,14 @@ static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition conditi
 /* PUBLIC NETWORKING HOOKS CALLED BY GAMEGUI.C CALLBACKS */
 //=============================================================================
 
-void StartNetworkListener(void)
+void StartNetworkListener(int playerSeat)
 {
     if (g_client_socket == -1) return;
     
     GIOChannel *io_channel = g_io_channel_unix_new(g_client_socket);
     g_io_channel_set_encoding(io_channel, NULL, NULL);
     g_io_channel_set_buffered(io_channel, FALSE);
-    g_io_add_watch(io_channel, G_IO_IN, OnServerMessageReceived, NULL);
+    g_io_add_watch(io_channel, G_IO_IN, OnServerMessageReceived, (gpointer)(intptr_t)playerSeat);
     g_io_channel_unref(io_channel);
 }
 
