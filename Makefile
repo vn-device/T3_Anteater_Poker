@@ -36,6 +36,6 @@ tar: all
 
 tar-enduser: all
 	@echo "Generating Poker_Beta.tar.gz..."
-	tar -czvf Poker_Beta.tar.gz bin doc README COPYRIGHT INSTALL
+	tar --exclude='doc/*[Ss]oftware*[Ss]pec*' -czvf Poker_Beta.tar.gz bin doc README COPYRIGHT INSTALL
 
 .PHONY: all clean test test-gui test-comm tar tar-enduser

@@ -1,6 +1,6 @@
 Anteater Poker
-Version: Alpha Release
-Date: May 24, 2026
+Version: Beta Release
+Date: May 30, 2026
 
 //=============================================================================
 Project Overview
@@ -24,20 +24,30 @@ This software is designed for and verified with the following configurations:
 //=============================================================================
 Execution
 //=============================================================================
-The server must be initialized before clients can connect.
-1. Launch the Server:
-* ./bin/poker_server
-2. Launch the Client:
+The application now utilizes an embedded server architecture for peer-to-peer hosting.
+
+1. Launch the Client:
 * ./bin/poker_client
+
+2. From the main menu, select "Host Private Game" to automatically spawn the background 
+server and generate a Room Code, or select "Join via Room Code" to connect to an existing host.
 
 //=============================================================================
 Release History
 //=============================================================================
+May 30, 2026 - V2.0
+Beta Release
+* Re-architected GUI into a GTK 3.0 Single-Page Application (SPA) with a dynamic layout stack.
+* Embedded the automated poker bots as pthreads within the authoritative server process space.
+* Integrated decentralized peer-to-peer lobby routing via Hexadecimal Room Codes.
+* Added advanced UI overlays: Active Round Timer and Ranked Showdown Leaderboard.
+* Updated build automation for split Beta documentation (Customer vs. Source distribution).
+
 May 25, 2026 - V1.0
 Alpha Release
 * Includes proper README, COPYRIGHT, INSTALL documentation
 * Bundle with Poker User Manual and Software Spec
-* Generic Poker Server & Cient UI implementation
+* Generic Poker Server & Client UI implementation
 
 //=============================================================================
 Team Information (Team T3)
@@ -49,4 +59,4 @@ Team Information (Team T3)
 * William Kuang
 * Kun Liang
 
-This project is licensed under the MIT License - see the COPYRIGHT file for details
+This project is licensed under the MIT License - see the COPYRIGHT file for details.
