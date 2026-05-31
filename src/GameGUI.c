@@ -16,6 +16,7 @@
 #include "GameData.h"
 #include "GameProtocol.h"
 #include <math.h>
+#include "HandEval.h"
 
 static GtkWidget *pMainWindow;
 static GtkWidget *pStatusLabel;
@@ -516,6 +517,122 @@ void ResetRoundTimer(void)
     g_TimerSourceId = g_timeout_add_seconds(1, OnTimerTick, NULL);
 }
 
+static void DrawShowdownOverlay(cairo_t *cr)
+{
+    if (g_pTable == NULL) return;
+
+    /*
+     * Build a combined 7-card array per player (2 hole + 5 community)
+     * and evaluate their best 5-card hand.
+     */
+    typedef struct {
+        int       seatIndex;
+        HandValue hv;
+    } SeatResult;
+
+    SeatResult results[MAX_PLAYERS];
+    int        resultCount = 0;
+
+    for (int s = 0; s < MAX_PLAYERS; s++) {
+        Player *p = &g_pTable->players[s];
+        if (p->name[0] == '\0' || p->isFolded) continue;
+
+        Card combined[7];
+        combined[0] = p->hand[0];
+        combined[1] = p->hand[1];
+        for (int i = 0; i < 5; i++)
+            combined[2 + i] = g_pTable->community[i];
+
+        results[resultCount].seatIndex = s;
+        EvaluateBestHand(combined, 7, &results[resultCount].hv);
+        resultCount++;
+    }
+
+    /* Insertion sort descending by hand strength */
+    for (int i = 1; i < resultCount; i++) {
+        SeatResult key = results[i];
+        int j = i - 1;
+        while (j >= 0 && CompareHandValues(&results[j].hv, &key.hv) < 0) {
+            results[j + 1] = results[j];
+            j--;
+        }
+        results[j + 1] = key;
+    }
+
+    /* ── Panel background ── */
+    const int panelW = 340;
+    const int panelH = 30 + resultCount * 26 + 10;
+    const int panelX = (TABLE_AREA_WIDTH  - panelW) / 2;
+    const int panelY = (TABLE_AREA_HEIGHT - panelH) / 2 - 20;
+
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 0.78);
+    cairo_rectangle(cr, panelX, panelY, panelW, panelH);
+    cairo_fill(cr);
+
+    cairo_set_source_rgba(cr, 1.0, 0.85, 0.0, 0.9);
+    cairo_set_line_width(cr, 2.0);
+    cairo_rectangle(cr, panelX, panelY, panelW, panelH);
+    cairo_stroke(cr);
+
+    /* ── Header ── */
+    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, 13);
+    cairo_set_source_rgb(cr, 1.0, 0.85, 0.0);
+    cairo_move_to(cr, panelX + 12, panelY + 20);
+    cairo_show_text(cr, "SHOWDOWN RESULTS");
+
+    /* ── Ranked rows ── */
+    for (int i = 0; i < resultCount; i++) {
+        Player   *p    = &g_pTable->players[results[i].seatIndex];
+        int       rowY = panelY + 30 + i * 26;
+        gboolean  isWinner = (i == 0);
+
+        /* Gold highlight for winner */
+        if (isWinner) {
+            cairo_set_source_rgba(cr, 1.0, 0.85, 0.0, 0.15);
+            cairo_rectangle(cr, panelX + 2, rowY, panelW - 4, 22);
+            cairo_fill(cr);
+        }
+
+        /* Rank number */
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
+                               CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, 11);
+        cairo_set_source_rgb(cr, isWinner ? 1.0 : 0.7,
+                                 isWinner ? 0.85 : 0.7,
+                                 isWinner ? 0.0 : 0.7);
+        char rankStr[4];
+        snprintf(rankStr, sizeof(rankStr), "#%d", i + 1);
+        cairo_move_to(cr, panelX + 10, rowY + 15);
+        cairo_show_text(cr, rankStr);
+
+        /* Player name (truncated) */
+        cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+        cairo_set_font_size(cr, 11);
+        char nameBuf[16];
+        snprintf(nameBuf, sizeof(nameBuf), "%.12s", p->name);
+        cairo_move_to(cr, panelX + 40, rowY + 15);
+        cairo_show_text(cr, nameBuf);
+
+        /* Hand category name from HandEval */
+        const char *handName = HandCategoryToString(results[i].hv.category);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_ITALIC,
+                               CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_source_rgba(cr, 0.7, 0.95, 0.7, 1.0);
+        cairo_move_to(cr, panelX + 155, rowY + 15);
+        cairo_show_text(cr, handName);
+
+        /* Points */
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL,
+                               CAIRO_FONT_WEIGHT_NORMAL);
+        cairo_set_source_rgba(cr, 0.8, 0.9, 0.8, 1.0);
+        char ptsBuf[16];
+        snprintf(ptsBuf, sizeof(ptsBuf), "$%d", p->points);
+        cairo_move_to(cr, panelX + panelW - 55, rowY + 15);
+        cairo_show_text(cr, ptsBuf);
+    }
+}
+
 static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
 {
 
@@ -580,7 +697,7 @@ static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
 
     DrawSeat(cr, sx, sy, p, s, isLocal, showCards, isTurn, isDealer);
     }
-    
+
     if (g_TimerSourceId != 0) {
         char timerBuf[32];
         int  mins = g_RoundElapsed / 60;
@@ -591,6 +708,10 @@ static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
         cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.75);
         cairo_move_to(cr, TABLE_AREA_WIDTH - 115, 20);
         cairo_show_text(cr, timerBuf);
+    }
+    
+    if (g_pTable != NULL && g_pTable->state == GAME_STATE_SHOWDOWN) {
+        DrawShowdownOverlay(cr);
     }
 
     return FALSE;
