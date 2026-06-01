@@ -376,14 +376,23 @@ int main(int argc, char *argv[])
                             if (msg.seat < 0 || msg.seat >= MAX_PLAYERS) {
                                 BuildErrorMessage(outBuffer, "Invalid seat bounds.");
                                 send(sd, outBuffer, strlen(outBuffer), 0);
+                                close(sd);
+                                client_sockets[i] = 0;
+                                g_ConnectedPlayers--;
                             }
                             else if (g_IsGameConfigured && msg.seat >= g_MaxPlayers) {
                                 BuildErrorMessage(outBuffer, "Seat outside configured table size.");
                                 send(sd, outBuffer, strlen(outBuffer), 0);
+                                close(sd);
+                                client_sockets[i] = 0;
+                                g_ConnectedPlayers--;
                             }
                             else if (g_HostSocket != -1 && !isBotJoin && strncmp(msg.payload, g_LobbyPassword, MAX_MSG_LEN) != 0) {
                                 BuildErrorMessage(outBuffer, "Incorrect lobby password.");
                                 send(sd, outBuffer, strlen(outBuffer), 0);
+                                close(sd);
+                                client_sockets[i] = 0;
+                                g_ConnectedPlayers--;
                             }
                             else {
                                 /* Enforce Unique Usernames against all currently connected sockets */
@@ -400,12 +409,18 @@ int main(int argc, char *argv[])
                                 if (isDuplicateName) {
                                     BuildErrorMessage(outBuffer, "Username already taken.");
                                     send(sd, outBuffer, strlen(outBuffer), 0);
+                                    close(sd);
+                                    client_sockets[i] = 0;
+                                    g_ConnectedPlayers--;
                                 }
                                 else if (g_MasterTable.players[msg.seat].socket != -1) {
                                     char errMsg[MAX_MSG_LEN];
                                     snprintf(errMsg, sizeof(errMsg), "Seat %d occupied.", msg.seat);
                                     BuildErrorMessage(outBuffer, errMsg);
                                     send(sd, outBuffer, strlen(outBuffer), 0);
+                                    close(sd);
+                                    client_sockets[i] = 0;
+                                    g_ConnectedPlayers--;
                                 } 
                                 else {
                                     g_MasterTable.players[msg.seat].socket = sd;

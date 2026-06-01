@@ -140,9 +140,10 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
 {
     struct sockaddr_in serv_addr;
     char outBuffer[MAX_MSG_LEN];
+    char respBuffer[MAX_MSG_LEN * 2];
     char hostIP[16] = "127.0.0.1";
     char hostname[256];
-    
+
     if (gethostname(hostname, sizeof(hostname)) == 0) {
         struct hostent *host = gethostbyname(hostname);
         if (host != NULL && host->h_addr_list[0] != NULL) {
@@ -150,7 +151,7 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
             strcpy(hostIP, inet_ntoa(*addr_list[0]));
         }
     }
-    
+
     struct in_addr addr;
     if (inet_pton(AF_INET, hostIP, &addr) == 1) {
         snprintf(outRoomCode, 9, "%08X", ntohl(addr.s_addr));
@@ -170,7 +171,7 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
         exit(EXIT_FAILURE);
     }
 
-    usleep(500000); 
+    usleep(500000);
 
     if ((g_client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         return 0;
@@ -188,93 +189,85 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
     BuildEnterMessage(outBuffer, name, 0, password);
     send(g_client_socket, outBuffer, strlen(outBuffer), 0);
 
-    char respBuffer[MAX_MSG_LEN];
-    ssize_t bytes_read = read(g_client_socket, respBuffer, MAX_MSG_LEN - 1);
-    
+    ssize_t bytes_read = read(g_client_socket, respBuffer, sizeof(respBuffer) - 1);
+
     if (bytes_read > 0) {
         respBuffer[bytes_read] = '\0';
-        ParsedMessage msg;
-        if (ParseNetworkMessage(respBuffer, &msg) == 0 && msg.type == MSG_TYPE_OK) {
-            *outSeat = 0;
 
-            if (strstr(respBuffer, "HOST") != NULL) {
-                BuildSetupMessage(outBuffer, maxPlayers);
-                send(g_client_socket, outBuffer, strlen(outBuffer), 0);
-                return 1;
-            }
-            
-            struct timeval tv = {1, 0}; 
-            fd_set readfds;
-            FD_ZERO(&readfds);
-            FD_SET(g_client_socket, &readfds);
-            
-            if (select(g_client_socket + 1, &readfds, NULL, NULL, &tv) > 0) {
-                bytes_read = read(g_client_socket, respBuffer, MAX_MSG_LEN - 1);
-                if (bytes_read > 0) {
-                    respBuffer[bytes_read] = '\0';
-                    if (ParseNetworkMessage(respBuffer, &msg) == 0 && msg.type == MSG_TYPE_HOST) {
-                        BuildSetupMessage(outBuffer, maxPlayers);
-                        send(g_client_socket, outBuffer, strlen(outBuffer), 0);
-                        return 1;
-                    }
-                }
-            }
+        char *first_newline = strchr(respBuffer, '\n');
+        if (first_newline == NULL) { close(g_client_socket); return 0; }
+        *first_newline = '\0';
+
+        ParsedMessage msg;
+        if (ParseNetworkMessage(respBuffer, &msg) != 0 || msg.type != MSG_TYPE_OK) {
+            close(g_client_socket);
+            return 0;
+        }
+        *outSeat = 0;
+
+        char *second_line = first_newline + 1;
+        char *second_newline = strchr(second_line, '\n');
+        if (second_newline != NULL) *second_newline = '\0';
+
+        if (ParseNetworkMessage(second_line, &msg) == 0 && msg.type == MSG_TYPE_HOST) {
+            BuildSetupMessage(outBuffer, maxPlayers);
+            send(g_client_socket, outBuffer, strlen(outBuffer), 0);
+            return 1;
         }
     }
-    
+
     close(g_client_socket);
     return 0;
 }
 
 int PerformJoinConnection(const char *name, const char *password, const char *roomCode, int *outSeat)
 {
-    struct sockaddr_in serv_addr;
-    char outBuffer[MAX_MSG_LEN];
     char serverIP[16];
-    
     unsigned int val;
-    if (sscanf(roomCode, "%08X", &val) != 1) {
-        return 0;
-    }
-    
+    if (sscanf(roomCode, "%08X", &val) != 1) return 0;
+
     struct in_addr addr;
     addr.s_addr = htonl(val);
-    if (inet_ntop(AF_INET, &addr, serverIP, 16) == NULL) {
-        return 0;
-    }
-
-    if ((g_client_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        return 0;
-    }
-
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(SERVER_PORT);
-    inet_pton(AF_INET, serverIP, &serv_addr.sin_addr);
-
-    if (connect(g_client_socket, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        close(g_client_socket);
-        return 0;
-    }
+    if (inet_ntop(AF_INET, &addr, serverIP, 16) == NULL) return 0;
 
     for (int s = 0; s < MAX_PLAYERS; s++) {
+        // Reconnect fresh for each seat attempt
+        struct sockaddr_in serv_addr;
+        serv_addr.sin_family      = AF_INET;
+        serv_addr.sin_port        = htons(SERVER_PORT);
+        inet_pton(AF_INET, serverIP, &serv_addr.sin_addr);
+
+        g_client_socket = socket(AF_INET, SOCK_STREAM, 0);
+        if (g_client_socket < 0) return 0;
+
+        if (connect(g_client_socket, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+            close(g_client_socket);
+            g_client_socket = -1;
+            return 0;
+        }
+
+        char outBuffer[MAX_MSG_LEN];
         BuildEnterMessage(outBuffer, name, s, password);
         send(g_client_socket, outBuffer, strlen(outBuffer), 0);
 
         char respBuffer[MAX_MSG_LEN];
         ssize_t bytes_read = read(g_client_socket, respBuffer, MAX_MSG_LEN - 1);
-        
+
         if (bytes_read > 0) {
             respBuffer[bytes_read] = '\0';
             ParsedMessage respMsg;
             if (ParseNetworkMessage(respBuffer, &respMsg) == 0 && respMsg.type == MSG_TYPE_OK) {
                 *outSeat = s;
-                return 1;
+                return 1; // keep g_client_socket open, this is now the live connection
             }
         }
+
+        // Seat rejected — close and try next
+        close(g_client_socket);
+        g_client_socket = -1;
     }
 
-    close(g_client_socket);
-    return 0; 
+    return 0;
 }
 
 //=============================================================================
