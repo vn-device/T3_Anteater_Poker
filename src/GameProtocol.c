@@ -79,10 +79,13 @@ int ParseNetworkMessage(const char* rawStr, ParsedMessage* pMsg)
     }
     else if (strcmp(cmd, CMD_UPDATE) == 0) {
         pMsg->type = MSG_TYPE_UPDATE;
+        int currentBet = 0;
+        int pot = 0;
         int roundPhase = 0;
-        if (sscanf(rawStr, "UPDATE %d %d %d %d", &pMsg->seat, &pMsg->amount, &roundPhase, &roundPhase) < 4) {
+        if (sscanf(rawStr, "UPDATE %d %d %d %d", &pMsg->seat, &currentBet, &pot, &roundPhase) < 4) {
             return -1;
         }
+        pMsg->amount = pot;
         snprintf(pMsg->payload, MAX_MSG_LEN, "%d", roundPhase);
         return 0;
     }

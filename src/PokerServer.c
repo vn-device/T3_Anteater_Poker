@@ -48,6 +48,7 @@ static int g_CurrentTurnSeat = 0;
 static int g_RoundPhase = GAME_STATE_PRE_FLOP;
 static int g_CurrentBet = 0;
 static int g_Pot = 0;
+static int g_ActionsThisPhase = 0;
 static Deck g_GameDeck;
 
 //=============================================================================
@@ -57,6 +58,10 @@ static Deck g_GameDeck;
 static void BroadcastGameUpdate(int client_socket)
 {
     char outBuffer[MAX_MSG_LEN];
+
+    g_MasterTable.pot = g_Pot;
+    g_MasterTable.state = g_RoundPhase;
+    g_MasterTable.activeIdx = g_CurrentTurnSeat;
     
     /* 1. Broadcast Core Table State */
     BuildUpdateMessage(outBuffer, g_CurrentTurnSeat, g_CurrentBet, g_Pot, g_RoundPhase);
@@ -124,17 +129,101 @@ static void InitializeGameRound(void)
     g_RoundPhase = GAME_STATE_PRE_FLOP;
     g_CurrentBet = 0;
     g_Pot = 0;
+    g_ActionsThisPhase = 0;
     g_CurrentTurnSeat = 0;
+}
+
+static int CountActivePlayers(void)
+{
+    int active = 0;
+
+    for (int i = 0; i < g_MaxPlayers; i++) {
+        if (g_MasterTable.players[i].socket != -1 &&
+            !g_MasterTable.players[i].isFolded) {
+            active++;
+        }
+    }
+
+    return active;
+}
+
+static void SetTurnToFirstActiveSeat(void)
+{
+    int attempts = 0;
+
+    g_CurrentTurnSeat = g_MasterTable.dealerIdx;
+    do {
+        g_CurrentTurnSeat = (g_CurrentTurnSeat + 1) % g_MaxPlayers;
+        attempts++;
+    } while ((g_MasterTable.players[g_CurrentTurnSeat].socket == -1 ||
+              g_MasterTable.players[g_CurrentTurnSeat].isFolded) &&
+             attempts < g_MaxPlayers);
+}
+
+static int AdvanceRoundPhaseIfReady(void)
+{
+    int activePlayers = CountActivePlayers();
+
+    if (activePlayers <= 1) {
+        g_RoundPhase = GAME_STATE_SHOWDOWN;
+        g_CurrentTurnSeat = -1;
+        g_MasterTable.pot = g_Pot;
+        DetermineWinner(&g_MasterTable);
+        g_Pot = g_MasterTable.pot;
+        BroadcastGameUpdate(-1);
+        return 1;
+    }
+
+    if (g_ActionsThisPhase < activePlayers) {
+        return 0;
+    }
+
+    g_ActionsThisPhase = 0;
+    g_CurrentBet = 0;
+
+    if (g_RoundPhase == GAME_STATE_PRE_FLOP) {
+        g_RoundPhase = GAME_STATE_FLOP;
+        g_MasterTable.state = g_RoundPhase;
+        DealCommunityCards(&g_MasterTable, &g_GameDeck, 3);
+    }
+    else if (g_RoundPhase == GAME_STATE_FLOP) {
+        g_RoundPhase = GAME_STATE_TURN;
+        g_MasterTable.state = g_RoundPhase;
+        DealCommunityCards(&g_MasterTable, &g_GameDeck, 1);
+    }
+    else if (g_RoundPhase == GAME_STATE_TURN) {
+        g_RoundPhase = GAME_STATE_RIVER;
+        g_MasterTable.state = g_RoundPhase;
+        DealCommunityCards(&g_MasterTable, &g_GameDeck, 1);
+    }
+    else {
+        g_RoundPhase = GAME_STATE_SHOWDOWN;
+        g_CurrentTurnSeat = -1;
+        g_MasterTable.pot = g_Pot;
+        DetermineWinner(&g_MasterTable);
+        g_Pot = g_MasterTable.pot;
+        BroadcastGameUpdate(-1);
+        return 1;
+    }
+
+    SetTurnToFirstActiveSeat();
+    BroadcastGameUpdate(-1);
+    return 1;
 }
 
 static void AdvanceTurn(void)
 {
     int attempts = 0;
+
+    if (AdvanceRoundPhaseIfReady()) {
+        return;
+    }
+
     do {
         g_CurrentTurnSeat = (g_CurrentTurnSeat + 1) % g_MaxPlayers;
         attempts++;
-    } while (g_MasterTable.players[g_CurrentTurnSeat].socket == -1 && 
-             g_MasterTable.players[g_CurrentTurnSeat].isFolded && 
+    } while ((g_MasterTable.players[g_CurrentTurnSeat].socket == -1 ||
+              g_MasterTable.players[g_CurrentTurnSeat].isFolded) &&
              attempts < g_MaxPlayers);
     
     BroadcastGameUpdate(-1); 
@@ -142,7 +231,7 @@ static void AdvanceTurn(void)
 
 //=============================================================================
 
-int main(void) 
+int main(int argc, char *argv[])
 {
     int server_fd, new_socket, activity, max_sd, sd;
     int client_sockets[MAX_PLAYERS];
@@ -151,6 +240,17 @@ int main(void)
     int addrlen = sizeof(address);
     char buffer[MAX_MSG_LEN];
     fd_set readfds;
+
+    if (argc > 1 && strcmp(argv[1], "--self-test") == 0) {
+        Deck testDeck;
+        CreateDeck(&testDeck);
+        if (testDeck.topIndex != 0 || testDeck.deck[0].rank != CARD_RANK_TWO) {
+            fprintf(stderr, "Server self-test failed.\n");
+            return EXIT_FAILURE;
+        }
+        printf("Server self-test passed.\n");
+        return EXIT_SUCCESS;
+    }
 
     memset(&g_MasterTable, 0, sizeof(Table));
     for (int i = 0; i < MAX_PLAYERS; i++) {
@@ -163,11 +263,15 @@ int main(void)
         exit(EXIT_FAILURE);
     }
 
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
-        perror("Setsockopt failed");
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("Setsockopt SO_REUSEADDR failed");
         close(server_fd);
         exit(EXIT_FAILURE);
     }
+
+#ifdef SO_REUSEPORT
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+#endif
 
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
@@ -244,6 +348,7 @@ int main(void)
                     for (int j = 0; j < MAX_PLAYERS; j++) {
                         if (g_MasterTable.players[j].socket == sd) {
                             g_MasterTable.players[j].socket = -1;
+                            g_MasterTable.players[j].isFolded = 1;
                             break;
                         }
                     }
@@ -261,11 +366,22 @@ int main(void)
                         char outBuffer[MAX_MSG_LEN];
 
                         if (msg.type == MSG_TYPE_ENTER) {
+                            char expectedBotName[MAX_NAME_LEN];
+                            int isBotJoin = 0;
+
+                            snprintf(expectedBotName, sizeof(expectedBotName), "Bot_Seat_%d", msg.seat);
+                            isBotJoin = (g_GamePhase == GAME_SPAWNING_BOTS &&
+                                         strncmp(msg.name, expectedBotName, MAX_NAME_LEN) == 0);
+
                             if (msg.seat < 0 || msg.seat >= MAX_PLAYERS) {
                                 BuildErrorMessage(outBuffer, "Invalid seat bounds.");
                                 send(sd, outBuffer, strlen(outBuffer), 0);
                             }
-                            else if (g_HostSocket != -1 && strncmp(msg.payload, g_LobbyPassword, MAX_MSG_LEN) != 0) {
+                            else if (g_IsGameConfigured && msg.seat >= g_MaxPlayers) {
+                                BuildErrorMessage(outBuffer, "Seat outside configured table size.");
+                                send(sd, outBuffer, strlen(outBuffer), 0);
+                            }
+                            else if (g_HostSocket != -1 && !isBotJoin && strncmp(msg.payload, g_LobbyPassword, MAX_MSG_LEN) != 0) {
                                 BuildErrorMessage(outBuffer, "Incorrect lobby password.");
                                 send(sd, outBuffer, strlen(outBuffer), 0);
                             }
@@ -295,6 +411,9 @@ int main(void)
                                     g_MasterTable.players[msg.seat].socket = sd;
                                     strncpy(g_MasterTable.players[msg.seat].name, msg.name, MAX_NAME_LEN - 1);
                                     g_MasterTable.players[msg.seat].points = 1000;
+                                    g_MasterTable.players[msg.seat].seat = msg.seat;
+                                    g_MasterTable.players[msg.seat].isBot = isBotJoin ? 1 : 0;
+                                    g_MasterTable.players[msg.seat].isFolded = 0;
                                     
                                     BuildOkMessage(outBuffer, msg.seat, msg.name, 1000);
                                     send(sd, outBuffer, strlen(outBuffer), 0);
@@ -310,10 +429,17 @@ int main(void)
                             }
                         } 
                         else if (msg.type == MSG_TYPE_SETUP && sd == g_HostSocket) {
-                            g_MaxPlayers = msg.seat; 
-                            g_IsGameConfigured = 1;
-                            g_GamePhase = GAME_WAITING_FOR_PLAYERS;
-                            g_GameStartTime = time(NULL);
+                            if (msg.seat < 2 || msg.seat > MAX_PLAYERS) {
+                                BuildErrorMessage(outBuffer, "Player count must be between 2 and 8.");
+                                send(sd, outBuffer, strlen(outBuffer), 0);
+                            }
+                            else {
+                                g_MaxPlayers = msg.seat;
+                                g_IsGameConfigured = 1;
+                                g_GamePhase = GAME_WAITING_FOR_PLAYERS;
+                                g_GameStartTime = time(NULL);
+                                BroadcastGameUpdate(-1);
+                            }
                         }
                         else if (msg.type == MSG_TYPE_START && sd == g_HostSocket) {
                             if (g_GamePhase == GAME_WAITING_FOR_PLAYERS) {
@@ -342,23 +468,65 @@ int main(void)
                         }
                         else {
                             if (msg.type == MSG_TYPE_ACTION) {
-                                if (msg.seat == g_CurrentTurnSeat) {
-                                    switch (msg.amount) {  
+                                int actionType = (unsigned char)msg.payload[0];
+
+                                if (g_GamePhase != GAME_ACTIVE_BETTING) {
+                                    BuildErrorMessage(outBuffer, "Game is not active.");
+                                    send(sd, outBuffer, strlen(outBuffer), 0);
+                                }
+                                else if (msg.seat < 0 || msg.seat >= g_MaxPlayers) {
+                                    BuildErrorMessage(outBuffer, "Invalid action seat.");
+                                    send(sd, outBuffer, strlen(outBuffer), 0);
+                                }
+                                else if (g_MasterTable.players[msg.seat].socket != sd) {
+                                    BuildErrorMessage(outBuffer, "Action rejected for non-owned seat.");
+                                    send(sd, outBuffer, strlen(outBuffer), 0);
+                                }
+                                else if (msg.seat != g_CurrentTurnSeat) {
+                                    BuildErrorMessage(outBuffer, "It is not your turn.");
+                                    send(sd, outBuffer, strlen(outBuffer), 0);
+                                }
+                                else if (g_MasterTable.players[msg.seat].isFolded) {
+                                    BuildErrorMessage(outBuffer, "Folded players cannot act.");
+                                    send(sd, outBuffer, strlen(outBuffer), 0);
+                                }
+                                else {
+                                    switch (actionType) {
                                         case ACTION_TYPE_FOLD:
                                             g_MasterTable.players[msg.seat].isFolded = 1;
                                             break;
                                         case ACTION_TYPE_CHECK:
+                                            if (g_CurrentBet > 0) {
+                                                BuildErrorMessage(outBuffer, "Cannot check against an active bet.");
+                                                send(sd, outBuffer, strlen(outBuffer), 0);
+                                                continue;
+                                            }
                                             break;
                                         case ACTION_TYPE_CALL:
+                                            if (g_CurrentBet > g_MasterTable.players[msg.seat].points) {
+                                                BuildErrorMessage(outBuffer, "Insufficient points to call.");
+                                                send(sd, outBuffer, strlen(outBuffer), 0);
+                                                continue;
+                                            }
                                             g_MasterTable.players[msg.seat].points -= g_CurrentBet;
                                             g_Pot += g_CurrentBet;
                                             break;
                                         case ACTION_TYPE_RAISE:
+                                            if (msg.amount <= g_CurrentBet || msg.amount > g_MasterTable.players[msg.seat].points) {
+                                                BuildErrorMessage(outBuffer, "Invalid raise amount.");
+                                                send(sd, outBuffer, strlen(outBuffer), 0);
+                                                continue;
+                                            }
+                                            g_CurrentBet = msg.amount;
                                             g_Pot += msg.amount;
                                             g_MasterTable.players[msg.seat].points -= msg.amount;
-                                            g_CurrentBet = msg.amount;
                                             break;
+                                        default:
+                                            BuildErrorMessage(outBuffer, "Unknown action type.");
+                                            send(sd, outBuffer, strlen(outBuffer), 0);
+                                            continue;
                                     }
+                                    g_ActionsThisPhase++;
                                     AdvanceTurn();
                                 }
                             } else {

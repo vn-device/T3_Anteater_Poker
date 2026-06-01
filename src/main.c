@@ -196,6 +196,12 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
         ParsedMessage msg;
         if (ParseNetworkMessage(respBuffer, &msg) == 0 && msg.type == MSG_TYPE_OK) {
             *outSeat = 0;
+
+            if (strstr(respBuffer, "HOST") != NULL) {
+                BuildSetupMessage(outBuffer, maxPlayers);
+                send(g_client_socket, outBuffer, strlen(outBuffer), 0);
+                return 1;
+            }
             
             struct timeval tv = {1, 0}; 
             fd_set readfds;
