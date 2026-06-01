@@ -30,6 +30,11 @@
 int g_client_socket = -1;
 pid_t g_server_pid = -1;
 
+static char g_stream_buffer[8192] = {0};
+static int g_stream_len = 0;
+static char g_initial_sync_buffer[4096] = {0};
+static int g_initial_sync_len = 0;
+
 /* Teardown hook to prevent background zombies if the user hosted */
 void CleanupLocalServer(void)
 {
@@ -40,47 +45,27 @@ void CleanupLocalServer(void)
 
 //=============================================================================
 
-static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition condition, gpointer data)
+static void ProcessServerBytes(const char *bytes, ssize_t bytes_read)
 {
-    /* Static accumulation buffer to handle TCP stream batching & fragmentation */
-    static char stream_buffer[8192] = {0};
-    static int stream_len = 0;
-    
-    char read_buf[1024];
-    int fd = g_io_channel_unix_get_fd(source);
-    ssize_t bytes_read = read(fd, read_buf, sizeof(read_buf) - 1);
-
-    if (bytes_read < 0) {
-        perror("Socket read error");
-        return FALSE; 
-    }
-
-    if (bytes_read == 0) {
-        g_print("Server disconnected. Closing client.\n");
-        gtk_main_quit();
-        return FALSE; 
-    }
-
-    read_buf[bytes_read] = '\0';
-    
     /* Append newly arrived bytes to the master stream buffer */
-    if (stream_len + bytes_read < (int)sizeof(stream_buffer)) {
-        strcat(stream_buffer, read_buf);
-        stream_len += bytes_read;
+    if (g_stream_len + bytes_read < (int)sizeof(g_stream_buffer)) {
+        memcpy(g_stream_buffer + g_stream_len, bytes, bytes_read);
+        g_stream_len += bytes_read;
+        g_stream_buffer[g_stream_len] = '\0';
     } else {
         g_printerr("Stream buffer overflow. Flushing.\n");
-        stream_buffer[0] = '\0';
-        stream_len = 0;
-        return TRUE;
+        g_stream_buffer[0] = '\0';
+        g_stream_len = 0;
+        return;
     }
 
     /* Tokenize and process EVERY complete message in the buffer */
     char *newline_pos;
-    while ((newline_pos = strchr(stream_buffer, '\n')) != NULL) {
+    while ((newline_pos = strchr(g_stream_buffer, '\n')) != NULL) {
         *newline_pos = '\0'; /* Isolate the single message */
         
         ParsedMessage msg;
-        if (ParseNetworkMessage(stream_buffer, &msg) == 0) {
+        if (ParseNetworkMessage(g_stream_buffer, &msg) == 0) {
             
             switch (msg.type) {
                 case MSG_TYPE_OK:
@@ -114,11 +99,49 @@ static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition conditi
         }
         
         /* Shift the unparsed remainder of the stream left to the front of the buffer */
-        int remaining = stream_len - (newline_pos - stream_buffer) - 1;
-        memmove(stream_buffer, newline_pos + 1, remaining);
-        stream_len = remaining;
-        stream_buffer[stream_len] = '\0';
+        int remaining = g_stream_len - (newline_pos - g_stream_buffer) - 1;
+        memmove(g_stream_buffer, newline_pos + 1, remaining);
+        g_stream_len = remaining;
+        g_stream_buffer[g_stream_len] = '\0';
     }
+}
+
+static void SaveInitialSyncTail(const char *buffer, ssize_t bytes_read)
+{
+    const char *tail = memchr(buffer, '\n', bytes_read);
+    ssize_t tail_len;
+
+    if (tail == NULL) return;
+
+    tail++;
+    tail_len = bytes_read - (tail - buffer);
+    if (tail_len <= 0) return;
+    if (tail_len > (ssize_t)sizeof(g_initial_sync_buffer)) {
+        tail_len = sizeof(g_initial_sync_buffer);
+    }
+
+    memcpy(g_initial_sync_buffer, tail, tail_len);
+    g_initial_sync_len = (int)tail_len;
+}
+
+static gboolean OnServerMessageReceived(GIOChannel *source, GIOCondition condition, gpointer data)
+{
+    char read_buf[1024];
+    int fd = g_io_channel_unix_get_fd(source);
+    ssize_t bytes_read = read(fd, read_buf, sizeof(read_buf) - 1);
+
+    if (bytes_read < 0) {
+        perror("Socket read error");
+        return FALSE; 
+    }
+
+    if (bytes_read == 0) {
+        g_print("Server disconnected. Closing client.\n");
+        gtk_main_quit();
+        return FALSE; 
+    }
+
+    ProcessServerBytes(read_buf, bytes_read);
 
     return TRUE; 
 }
@@ -134,6 +157,12 @@ void StartNetworkListener(int playerSeat)
     g_io_channel_set_buffered(io_channel, FALSE);
     g_io_add_watch(io_channel, G_IO_IN, OnServerMessageReceived, NULL);
     g_io_channel_unref(io_channel);
+
+    if (g_initial_sync_len > 0) {
+        ProcessServerBytes(g_initial_sync_buffer, g_initial_sync_len);
+        g_initial_sync_len = 0;
+        g_initial_sync_buffer[0] = '\0';
+    }
 }
 
 int PerformHostConnection(const char *name, const char *password, int maxPlayers, char *outRoomCode, int *outSeat)
@@ -196,6 +225,7 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
         ParsedMessage msg;
         if (ParseNetworkMessage(respBuffer, &msg) == 0 && msg.type == MSG_TYPE_OK) {
             *outSeat = 0;
+            SaveInitialSyncTail(respBuffer, bytes_read);
 
             if (strstr(respBuffer, "HOST") != NULL) {
                 BuildSetupMessage(outBuffer, maxPlayers);
@@ -213,6 +243,7 @@ int PerformHostConnection(const char *name, const char *password, int maxPlayers
                 if (bytes_read > 0) {
                     respBuffer[bytes_read] = '\0';
                     if (ParseNetworkMessage(respBuffer, &msg) == 0 && msg.type == MSG_TYPE_HOST) {
+                        SaveInitialSyncTail(respBuffer, bytes_read);
                         BuildSetupMessage(outBuffer, maxPlayers);
                         send(g_client_socket, outBuffer, strlen(outBuffer), 0);
                         return 1;
@@ -268,6 +299,7 @@ int PerformJoinConnection(const char *name, const char *password, const char *ro
             ParsedMessage respMsg;
             if (ParseNetworkMessage(respBuffer, &respMsg) == 0 && respMsg.type == MSG_TYPE_OK) {
                 *outSeat = s;
+                SaveInitialSyncTail(respBuffer, bytes_read);
                 return 1;
             }
         }

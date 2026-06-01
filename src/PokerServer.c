@@ -45,7 +45,7 @@ char g_LobbyPassword[MAX_MSG_LEN] = {0};
 static GamePhase g_GamePhase = GAME_WAITING_FOR_SETUP;
 static int g_GameStartTime = 0;
 static int g_CurrentTurnSeat = 0;
-static int g_RoundPhase = GAME_STATE_PRE_FLOP;
+static int g_RoundPhase = GAME_STATE_WAITING;
 static int g_CurrentBet = 0;
 static int g_Pot = 0;
 static int g_ActionsThisPhase = 0;
@@ -357,6 +357,12 @@ int main(int argc, char *argv[])
                         g_IsGameConfigured = 0;
                         g_MaxPlayers = MAX_PLAYERS;
                         memset(g_LobbyPassword, 0, MAX_MSG_LEN);
+                        g_GamePhase = GAME_WAITING_FOR_SETUP;
+                        g_RoundPhase = GAME_STATE_WAITING;
+                        g_CurrentTurnSeat = 0;
+                        g_CurrentBet = 0;
+                        g_Pot = 0;
+                        g_ActionsThisPhase = 0;
                         printf("Lobby empty. Configuration state reset.\n");
                     }
                 } 
@@ -379,6 +385,11 @@ int main(int argc, char *argv[])
                             }
                             else if (g_IsGameConfigured && msg.seat >= g_MaxPlayers) {
                                 BuildErrorMessage(outBuffer, "Seat outside configured table size.");
+                                send(sd, outBuffer, strlen(outBuffer), 0);
+                            }
+                            else if (g_GamePhase == GAME_ACTIVE_BETTING ||
+                                     (g_GamePhase == GAME_SPAWNING_BOTS && !isBotJoin)) {
+                                BuildErrorMessage(outBuffer, "Game already started.");
                                 send(sd, outBuffer, strlen(outBuffer), 0);
                             }
                             else if (g_HostSocket != -1 && !isBotJoin && strncmp(msg.payload, g_LobbyPassword, MAX_MSG_LEN) != 0) {
@@ -425,6 +436,8 @@ int main(int argc, char *argv[])
                                         BuildHostMessage(outBuffer);
                                         send(sd, outBuffer, strlen(outBuffer), 0);
                                     }
+
+                                    BroadcastGameUpdate(-1);
                                 }
                             }
                         } 
@@ -437,6 +450,11 @@ int main(int argc, char *argv[])
                                 g_MaxPlayers = msg.seat;
                                 g_IsGameConfigured = 1;
                                 g_GamePhase = GAME_WAITING_FOR_PLAYERS;
+                                g_RoundPhase = GAME_STATE_WAITING;
+                                g_CurrentTurnSeat = 0;
+                                g_CurrentBet = 0;
+                                g_Pot = 0;
+                                g_ActionsThisPhase = 0;
                                 g_GameStartTime = time(NULL);
                                 BroadcastGameUpdate(-1);
                             }

@@ -92,6 +92,18 @@ static void FormatNetworkString(char *str, const gchar *input, size_t max_len)
     }
 }
 
+static void ShowLobbyError(const char *message)
+{
+    GtkWidget *err = gtk_message_dialog_new(GTK_WINDOW(pMainWindow),
+                                            GTK_DIALOG_MODAL,
+                                            GTK_MESSAGE_ERROR,
+                                            GTK_BUTTONS_OK,
+                                            "%s",
+                                            message);
+    gtk_dialog_run(GTK_DIALOG(err));
+    gtk_widget_destroy(err);
+}
+
 static void OnHostStartClicked(GtkWidget *widget, gpointer data)
 {
     char safeName[32], safePass[32], roomCode[16] = {0};
@@ -100,6 +112,11 @@ static void OnHostStartClicked(GtkWidget *widget, gpointer data)
     FormatNetworkString(safeName, gtk_entry_get_text(GTK_ENTRY(h_name_entry)), sizeof(safeName));
     FormatNetworkString(safePass, gtk_entry_get_text(GTK_ENTRY(h_pass_entry)), sizeof(safePass));
     int maxPlayers = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(h_spin));
+
+    if (safeName[0] == '\0' || safePass[0] == '\0') {
+        ShowLobbyError("Username and lobby password are required.");
+        return;
+    }
 
     if (PerformHostConnection(safeName, safePass, maxPlayers, roomCode, &seat)) {
         g_LocalSeat = seat;
@@ -115,9 +132,7 @@ static void OnHostStartClicked(GtkWidget *widget, gpointer data)
         }
     }
     else {
-        GtkWidget *err = gtk_message_dialog_new(GTK_WINDOW(pMainWindow), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Failed to initialize Host Server.");
-        gtk_dialog_run(GTK_DIALOG(err));
-        gtk_widget_destroy(err);
+        ShowLobbyError("Failed to initialize host lobby.");
     }
 }
 
@@ -130,6 +145,11 @@ static void OnJoinConnectClicked(GtkWidget *widget, gpointer data)
     FormatNetworkString(safeName, gtk_entry_get_text(GTK_ENTRY(j_name_entry)), sizeof(safeName));
     FormatNetworkString(safePass, gtk_entry_get_text(GTK_ENTRY(j_pass_entry)), sizeof(safePass));
 
+    if (safeName[0] == '\0' || safePass[0] == '\0' || rawCode[0] == '\0') {
+        ShowLobbyError("Room code, username, and password are required.");
+        return;
+    }
+
     if (PerformJoinConnection(safeName, safePass, rawCode, &seat)) {
         g_LocalSeat = seat;
         char hudMsg[128];
@@ -140,9 +160,7 @@ static void OnJoinConnectClicked(GtkWidget *widget, gpointer data)
         StartNetworkListener(seat);
     }
     else {
-        GtkWidget *err = gtk_message_dialog_new(GTK_WINDOW(pMainWindow), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Connection Rejected. Lobby may be full or Code is invalid.");
-        gtk_dialog_run(GTK_DIALOG(err));
-        gtk_widget_destroy(err);
+        ShowLobbyError("Connection rejected. Check the room code, password, and username.");
     }
 }
 
@@ -811,7 +829,7 @@ static GtkWidget* CreateLobbyPage(void)
     
     GtkWidget *hbox_host_btns = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     GtkWidget *btn_host_back = gtk_button_new_with_label("Back");
-    GtkWidget *btn_host_start = gtk_button_new_with_label("Start Server");
+    GtkWidget *btn_host_start = gtk_button_new_with_label("Create Lobby");
     gtk_box_pack_start(GTK_BOX(hbox_host_btns), btn_host_back, TRUE, TRUE, 0);
     gtk_box_pack_start(GTK_BOX(hbox_host_btns), btn_host_start, TRUE, TRUE, 0);
     
@@ -891,7 +909,7 @@ static GtkWidget* CreateTablePage(void)
     gtk_box_pack_start(GTK_BOX(tableVBox), pTableArea, TRUE, TRUE, 0);
 
     /* Host Control Panel (Above the Action Buttons) */
-    pButtonStartGame = gtk_button_new_with_label("START GAME (Host Override)");
+    pButtonStartGame = gtk_button_new_with_label("START GAME");
     gtk_widget_set_margin_start(pButtonStartGame, MARGIN_BUTTON_AREA);
     gtk_widget_set_margin_end(pButtonStartGame, MARGIN_BUTTON_AREA);
     gtk_box_pack_start(GTK_BOX(tableVBox), pButtonStartGame, FALSE, FALSE, 5);
@@ -1027,6 +1045,7 @@ void ClientSyncSeat(int seat, const char* name, int points, int isFolded)
 {
     if (g_pTable && seat >= 0 && seat < MAX_PLAYERS) {
         strncpy(g_pTable->players[seat].name, name, MAX_NAME_LEN - 1);
+        g_pTable->players[seat].name[MAX_NAME_LEN - 1] = '\0';
         g_pTable->players[seat].points = points;
         g_pTable->players[seat].isFolded = isFolded;
         TriggerTableRedraw();
