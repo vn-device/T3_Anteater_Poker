@@ -62,6 +62,7 @@ typedef struct {
     MSG_TYPE type;
     int seat;
     int amount;                
+    int currentBet;
     char name[MAX_NAME_LEN];
     char payload[MAX_MSG_LEN]; 
 } ParsedMessage;

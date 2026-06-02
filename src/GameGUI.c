@@ -1029,6 +1029,7 @@ void ClientReceiveHoleCards(int r1, char s1, int r2, char s2)
         g_pTable->players[g_LocalSeat].hand[1].rank = r2;
         g_pTable->players[g_LocalSeat].hand[1].suit = s2;
         TriggerTableRedraw();
+        SyncGUIWithGameState();
     }
 }
 
@@ -1038,6 +1039,7 @@ void ClientReceiveCommunityCard(int index, int rank, char suit)
         g_pTable->community[index].rank = rank;
         g_pTable->community[index].suit = suit;
         TriggerTableRedraw();
+        SyncGUIWithGameState();
     }
 }
 

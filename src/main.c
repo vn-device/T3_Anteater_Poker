@@ -90,6 +90,7 @@ static void ProcessServerBytes(const char *bytes, ssize_t bytes_read)
                         g_pTable->pot = msg.amount;
                         g_pTable->state = atoi(msg.payload);
                     }
+                    UpdateActionContext(msg.currentBet, msg.currentBet + 10);
                     ResetRoundTimer();
                     TriggerTableRedraw();
                     SyncGUIWithGameState();

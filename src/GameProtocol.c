@@ -21,6 +21,7 @@ int ParseNetworkMessage(const char* rawStr, ParsedMessage* pMsg)
     pMsg->type = MSG_TYPE_UNKNOWN;
     pMsg->seat = -1;
     pMsg->amount = 0;
+    pMsg->currentBet = 0;
     memset(pMsg->name, 0, MAX_NAME_LEN);
     memset(pMsg->payload, 0, MAX_MSG_LEN);
 
@@ -85,6 +86,7 @@ int ParseNetworkMessage(const char* rawStr, ParsedMessage* pMsg)
         if (sscanf(rawStr, "UPDATE %d %d %d %d", &pMsg->seat, &currentBet, &pot, &roundPhase) < 4) {
             return -1;
         }
+        pMsg->currentBet = currentBet;
         pMsg->amount = pot;
         snprintf(pMsg->payload, MAX_MSG_LEN, "%d", roundPhase);
         return 0;
@@ -189,7 +191,7 @@ void BuildHoleCardsMessage(char* buffer, int r1, char s1, int r2, char s2)
 void BuildCommunityMessage(char* buffer, int index, int rank, char suit)
 {
     if (buffer == NULL) return;
-    snprintf(buffer, MAX_MSG_LEN, "COMM %d %d %c\n", index, rank, suit);
+    snprintf(buffer, MAX_MSG_LEN, "COMM %d %d %c\n", index, rank, suit ? suit : SUIT_NONE);
 }
 
 void BuildSyncMessage(char* buffer, int seat, int points, int isFolded, const char* name)
