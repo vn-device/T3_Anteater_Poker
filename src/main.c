@@ -9,6 +9,7 @@
  * peer-to-peer room connections and headless testing integration.
  *****************************************************************************/
 
+#define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>

@@ -61,7 +61,7 @@ void ShuffleDeck(Deck* pDeck)
 {
     if (pDeck == NULL) return;
 
-    srand(time(NULL)); ^ (unsigned)getpid());
+    srand(time(NULL) ^ (unsigned)getpid());
 
     for (int i = DECK_SIZE - 1; i > 0; i--) {
         int j = rand() % (i + 1);
