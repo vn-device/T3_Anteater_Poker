@@ -9,6 +9,7 @@
  * and executing randomized actions via the network protocol.
  *****************************************************************************/
 
+#define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
 #include "PokerBot.h"
@@ -28,7 +29,7 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#define sleep_ms(x) usleep((x)*1000)
+#define sleep_ms(x) usleep((x) * 1000)
 #define MAX_RECV 512
 
 static int RandomPercent()
@@ -74,6 +75,10 @@ void* RunPokerBotThread(void *arg)
     char name[32];
     const char *password = "AnteaterTest";
 
+    char stream_buf[4096];
+    int stream_len = 0;
+    memset(stream_buf, 0, sizeof(stream_buf));
+
     srand((unsigned)time(NULL) ^ (unsigned)pthread_self());
     snprintf(name, sizeof(name), "Bot_Seat_%d", targetSeat);
 
@@ -83,6 +88,7 @@ void* RunPokerBotThread(void *arg)
     memset(&serv, 0, sizeof(serv));
     serv.sin_family = AF_INET;
     serv.sin_port = htons(BOT_SERVER_PORT);
+
     if (inet_pton(AF_INET, BOT_SERVER_IP, &serv.sin_addr) <= 0) {
         close(sock);
         return NULL;
@@ -108,11 +114,14 @@ void* RunPokerBotThread(void *arg)
     
     int rv = select(sock + 1, &readfds, NULL, NULL, &tv);
     if (rv > 0 && FD_ISSET(sock, &readfds)) {
-        ssize_t r = recv(sock, buf, sizeof(buf)-1, 0);
+        ssize_t r = recv(sock, buf, sizeof(buf) - 1, 0);
         if (r > 0) {
             buf[r] = '\0';
+
             ParsedMessage msg;
-            if (ParseNetworkMessage(buf, &msg) == 0 && msg.type == MSG_TYPE_OK && msg.seat == targetSeat) {
+            if (ParseNetworkMessage(buf, &msg) == 0 &&
+                msg.type == MSG_TYPE_OK &&
+                msg.seat == targetSeat) {
                 assignedSeat = targetSeat;
             }
         }
@@ -136,17 +145,42 @@ void* RunPokerBotThread(void *arg)
             if (errno == EINTR) continue;
             break;
         }
+
         if (rv == 0) continue;
 
         if (FD_ISSET(sock, &readfds)) {
-            ssize_t r = recv(sock, buf, sizeof(buf)-1, 0);
+            ssize_t r = recv(sock, buf, sizeof(buf) - 1, 0);
             if (r <= 0) break;
-            
-            buf[r] = '\0';
-            ParsedMessage msg;
-            if (ParseNetworkMessage(buf, &msg) == 0 && msg.type == MSG_TYPE_UPDATE && msg.seat == assignedSeat) {
-                isMyTurn = 1;
+
+            if (stream_len + r < (int)sizeof(stream_buf)) {
+                memcpy(stream_buf + stream_len, buf, r);
+                stream_len += (int)r;
+                stream_buf[stream_len] = '\0';
             }
+            else {
+                fprintf(stderr, "[EmbeddedBot %d] Stream buffer overflow. Flushing.\n", assignedSeat);
+                stream_buf[0] = '\0';
+                stream_len = 0;
+                continue;
+            }
+
+            char *newline;
+            while ((newline = strchr(stream_buf, '\n')) != NULL) {
+                *newline = '\0';
+
+                ParsedMessage msg;
+                if (ParseNetworkMessage(stream_buf, &msg) == 0) {
+                    if (msg.type == MSG_TYPE_UPDATE && msg.seat == assignedSeat) {
+                        isMyTurn = 1;
+                    }
+                }
+
+                int remaining = stream_len - (int)(newline - stream_buf) - 1;
+                memmove(stream_buf, newline + 1, remaining);
+                stream_len = remaining;
+                stream_buf[stream_len] = '\0';
+            }
+
             if (isMyTurn) {
                 usleep(500000); /* 500ms humanization delay */
                 DecideAndAct(sock, assignedSeat);
