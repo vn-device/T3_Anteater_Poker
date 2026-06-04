@@ -28,6 +28,9 @@
 #define CMD_HOLECARDS "HOLECARDS"
 #define CMD_COMMUNITY "COMM"
 #define CMD_SYNC      "SYNC"
+#define CMD_SHOWDOWN  "SHOWDOWN"
+#define CMD_NEXTHAND  "NEXTHAND"
+#define CMD_LIMITS    "LIMITS"    /* NEW: Bet range limits for Bot pre-validation */
 
 /* Network Action Type Constants */
 #define ACTION_TYPE_FOLD  1
@@ -52,7 +55,10 @@ typedef enum {
     MSG_TYPE_START,
     MSG_TYPE_HOLECARDS,
     MSG_TYPE_COMMUNITY,
-    MSG_TYPE_SYNC
+    MSG_TYPE_SYNC,
+    MSG_TYPE_SHOWDOWN,
+    MSG_TYPE_NEXTHAND,
+    MSG_TYPE_LIMITS       /* NEW: Bet range limits for Bot decision pre-validation */
 } MSG_TYPE;
 
 /**
@@ -61,8 +67,13 @@ typedef enum {
 typedef struct {
     MSG_TYPE type;
     int seat;
-    int amount;                
+    int amount;
+    int pot;
     int currentBet;
+    int minRaise;
+    int maxRaise;           /* NEW: Upper limit for legal raise (player.chips) */
+    int minAllowedRaise;    /* NEW: Lower limit (min raise amount) */
+    int dealerIdx;
     char name[MAX_NAME_LEN];
     char payload[MAX_MSG_LEN]; 
 } ParsedMessage;
@@ -77,12 +88,15 @@ void BuildActionMessage(char* buffer, int seat, int actionType, int amount);
 void BuildHostMessage(char* buffer);
 void BuildSetupMessage(char* buffer, int maxPlayers);
 void BuildStartMessage(char* buffer);
-void BuildUpdateMessage(char* buffer, int currentTurnSeat, int currentBet, int pot, int roundPhase);
+void BuildUpdateMessage(char* buffer, int currentTurnSeat, int callAmount, int currentBet, int pot, int roundPhase, int minRaise, int dealerIdx);
 
 /* New Data Synchronization Builders */
 void BuildHoleCardsMessage(char* buffer, int r1, char s1, int r2, char s2);
 void BuildCommunityMessage(char* buffer, int index, int rank, char suit);
-void BuildSyncMessage(char* buffer, int seat, int points, int isFolded, const char* name);
+void BuildSyncMessage(char* buffer, int seat, int points, int isFolded, int outOfGame, const char* name);
+void BuildShowdownCardsMessage(char* buffer, int seat, int r1, char s1, int r2, char s2);
+void BuildNextHandMessage(char* buffer);
+void BuildLimitsMessage(char* buffer, int seat, int minAllowedRaise, int maxAllowedRaise);  /* NEW: Bet limits */
 
 //=============================================================================
 
