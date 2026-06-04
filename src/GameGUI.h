@@ -38,7 +38,9 @@ void SyncGUIWithGameState(void);
 /* Local Client Memory Hooks */
 void ClientReceiveHoleCards(int r1, char s1, int r2, char s2);
 void ClientReceiveCommunityCard(int index, int rank, char suit);
-void ClientSyncSeat(int seat, const char* name, int points, int isFolded);
+void ClientSyncSeat(int seat, const char* name, int points, int isFolded, int outOfGame);
+void ClientReceiveShowdownCards(int seat, int r1, char s1, int r2, char s2);
+void ClientApplyRoundUpdate(int activeIdx, int pot, int state, int dealerIdx, int callAmount, int minRaise);
 
 //=============================================================================
 
