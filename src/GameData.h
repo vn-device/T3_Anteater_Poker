@@ -16,6 +16,10 @@
 #define MAX_NAME_LEN 32
 #define DECK_SIZE    58  // 52 standard + 4 Anteater cards + 2 Jokers
 
+#define BLIND_SMALL       5
+#define BLIND_BIG        10
+#define SHOWDOWN_DELAY_S  8
+
 /* Card Suit Characters */
 #define SUIT_HEARTS   'H'
 #define SUIT_DIAMONDS 'D'
@@ -90,6 +94,11 @@ typedef struct {
     int socket;
     unsigned char isBot;
     unsigned char isFolded;
+    unsigned char outOfGame;
+    unsigned char cardsVisible;
+
+    int total_hand_investment;
+    int street_investment;
 
     Card hand[2];
 } Player;

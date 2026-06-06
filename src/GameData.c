@@ -75,6 +75,16 @@ void ShuffleDeck(Deck* pDeck)
 
 //=============================================================================
 
+static int IsPlayerInHand(const Table *pTable, int seat)
+{
+    if (pTable == NULL || seat < 0 || seat >= MAX_PLAYERS) {
+        return 0;
+    }
+
+    const Player *p = &pTable->players[seat];
+    return p->socket != -1 && !p->outOfGame && p->points > 0;
+}
+
 void DealHoleCards(Table* pTable, Deck* pDeck)
 {
     if (pTable == NULL || pDeck == NULL) return;
@@ -86,10 +96,12 @@ void DealHoleCards(Table* pTable, Deck* pDeck)
     for (int i = 0; i < MAX_PLAYERS; i++) {
         int curr = (startIdx + i) % MAX_PLAYERS;
         
-        /* Proceed only if the seat is occupied by a human or bot */
-        if (pTable->players[curr].socket != -1) {
+        if (IsPlayerInHand(pTable, curr)) {
             pTable->players[curr].hand[0] = pDeck->deck[pDeck->topIndex++];
             pTable->players[curr].isFolded = 0;
+            pTable->players[curr].cardsVisible = 0;
+            pTable->players[curr].total_hand_investment = 0;
+            pTable->players[curr].street_investment = 0;
         }
     }
 
@@ -97,7 +109,7 @@ void DealHoleCards(Table* pTable, Deck* pDeck)
     for (int i = 0; i < MAX_PLAYERS; i++) {
         int curr = (startIdx + i) % MAX_PLAYERS;
         
-        if (pTable->players[curr].socket != -1) {
+        if (IsPlayerInHand(pTable, curr)) {
             pTable->players[curr].hand[1] = pDeck->deck[pDeck->topIndex++];
         }
     }
@@ -156,42 +168,28 @@ int GetDealerIndex(Table* pTable)
 
 //=============================================================================
 
-void DetermineWinner(Table* pTable)
+static void AwardPotLayer(Table *pTable, int potAmount, const int *eligible, int eligibleCount)
 {
-    int eligiblePlayers[MAX_PLAYERS];
     int winnerIndexes[MAX_PLAYERS];
-    int eligibleCount = 0;
     int winnerCount = 0;
     HandValue bestValue;
 
-    if (pTable == NULL) {
-        return;
-    }
-
-    for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (pTable->players[i].socket != -1 && !pTable->players[i].isFolded) {
-            eligiblePlayers[eligibleCount++] = i;
-        }
-    }
-
-    if (eligibleCount == 0) {
+    if (pTable == NULL || potAmount <= 0 || eligibleCount <= 0) {
         return;
     }
 
     if (eligibleCount == 1) {
-        int winner = eligiblePlayers[0];
-        pTable->players[winner].points += pTable->pot;
-        printf("Winner: %s wins %d points by default.\n",
-               pTable->players[winner].name,
-               pTable->pot);
-        pTable->pot = 0;
+        pTable->players[eligible[0]].points += potAmount;
+        printf("Winner: %s wins side pot %d points uncontested.\n",
+               pTable->players[eligible[0]].name,
+               potAmount);
         return;
     }
 
     bestValue.category = HAND_CATEGORY_INVALID;
 
     for (int i = 0; i < eligibleCount; i++) {
-        int playerIndex = eligiblePlayers[i];
+        int playerIndex = eligible[i];
         Card cards[7];
         HandValue playerValue;
 
@@ -224,8 +222,8 @@ void DetermineWinner(Table* pTable)
         return;
     }
 
-    int share = pTable->pot / winnerCount;
-    int remainder = pTable->pot % winnerCount;
+    int share = potAmount / winnerCount;
+    int remainder = potAmount % winnerCount;
 
     printf("Winning hand: %s\n", HandCategoryToString(bestValue.category));
 
@@ -237,6 +235,99 @@ void DetermineWinner(Table* pTable)
         printf("Winner: %s wins %d points.\n",
                pTable->players[playerIndex].name,
                award);
+    }
+}
+
+void DetermineWinner(Table* pTable)
+{
+    int tiers[MAX_PLAYERS];
+    int tierCount = 0;
+    int eligible[MAX_PLAYERS];
+    int eligibleCount = 0;
+
+    if (pTable == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        if (pTable->players[i].socket != -1 &&
+            !pTable->players[i].isFolded &&
+            !pTable->players[i].outOfGame) {
+            eligible[eligibleCount++] = i;
+        }
+    }
+
+    if (eligibleCount == 0) {
+        pTable->pot = 0;
+        return;
+    }
+
+    if (eligibleCount == 1) {
+        int winner = eligible[0];
+        pTable->players[winner].points += pTable->pot;
+        printf("Winner: %s wins %d points by default.\n",
+               pTable->players[winner].name,
+               pTable->pot);
+        pTable->pot = 0;
+        return;
+    }
+
+    for (int i = 0; i < MAX_PLAYERS; i++) {
+        int investment = pTable->players[i].total_hand_investment;
+        if (investment <= 0) {
+            continue;
+        }
+
+        int seen = 0;
+        for (int t = 0; t < tierCount; t++) {
+            if (tiers[t] == investment) {
+                seen = 1;
+                break;
+            }
+        }
+        if (!seen) {
+            tiers[tierCount++] = investment;
+        }
+    }
+
+    for (int i = 0; i < tierCount - 1; i++) {
+        for (int j = i + 1; j < tierCount; j++) {
+            if (tiers[i] > tiers[j]) {
+                int tmp = tiers[i];
+                tiers[i] = tiers[j];
+                tiers[j] = tmp;
+            }
+        }
+    }
+
+    int prevTier = 0;
+    for (int t = 0; t < tierCount; t++) {
+        int tier = tiers[t];
+        int contributors = 0;
+        int layerEligible[MAX_PLAYERS];
+        int layerEligibleCount = 0;
+
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            if (pTable->players[i].total_hand_investment >= tier) {
+                contributors++;
+                if (!pTable->players[i].isFolded && !pTable->players[i].outOfGame) {
+                    layerEligible[layerEligibleCount++] = i;
+                }
+            }
+        }
+
+        int layerPot = (tier - prevTier) * contributors;
+        prevTier = tier;
+
+        if (layerPot <= 0) {
+            continue;
+        }
+
+        if (layerEligibleCount == 0) {
+            continue;
+        }
+
+        AwardPotLayer(pTable, layerPot, layerEligible, layerEligibleCount);
     }
 
     pTable->pot = 0;

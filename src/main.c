@@ -82,18 +82,20 @@ static void ProcessServerBytes(const char *bytes, ssize_t bytes_read)
                     ClientReceiveCommunityCard(msg.seat, msg.amount, msg.payload[0]);
                     break;
                 case MSG_TYPE_SYNC:
-                    ClientSyncSeat(msg.seat, msg.name, msg.amount, msg.payload[0] == '1' ? 1 : 0);
+                    ClientSyncSeat(msg.seat, msg.name, msg.amount,
+                                   msg.payload[0] == '1' ? 1 : 0,
+                                   msg.payload[1] == '1' ? 1 : 0);
                     break;
                 case MSG_TYPE_UPDATE:
-                    if (g_pTable != NULL) {
-                        g_pTable->activeIdx = msg.seat;
-                        g_pTable->pot = msg.amount;
-                        g_pTable->state = atoi(msg.payload);
-                    }
-                    UpdateActionContext(msg.currentBet, msg.currentBet + 10);
+                    ClientApplyRoundUpdate(msg.seat, msg.pot, atoi(msg.payload),
+                                           msg.dealerIdx, msg.amount, msg.minRaise);
                     ResetRoundTimer();
                     TriggerTableRedraw();
                     SyncGUIWithGameState();
+                    break;
+                case MSG_TYPE_SHOWDOWN:
+                    ClientReceiveShowdownCards(msg.seat, msg.amount, msg.payload[0],
+                                               msg.currentBet, msg.payload[1]);
                     break;
                 default:
                     break;

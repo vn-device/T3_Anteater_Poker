@@ -36,6 +36,7 @@ static GtkWidget *pButtonCheck = NULL;
 static GtkWidget *pButtonCall  = NULL;
 static GtkWidget *pButtonRaise = NULL;
 static GtkWidget *pButtonStartGame = NULL;
+static GtkWidget *pButtonNextHand = NULL;
 
 /* Lobby Input Pointers */
 static GtkWidget *h_name_entry, *h_pass_entry, *h_spin;
@@ -161,6 +162,21 @@ static void OnJoinConnectClicked(GtkWidget *widget, gpointer data)
     }
     else {
         ShowLobbyError("Connection rejected. Check the room code, password, and username.");
+    }
+}
+
+static void OnNextHandClicked(GtkWidget *widget, gpointer data)
+{
+    extern int g_client_socket;
+    char buffer[MAX_MSG_LEN];
+
+    (void)widget;
+    (void)data;
+
+    BuildNextHandMessage(buffer);
+    if (g_client_socket != -1) {
+        send(g_client_socket, buffer, strlen(buffer), 0);
+        gtk_widget_set_sensitive(pButtonNextHand, FALSE);
     }
 }
 
@@ -703,10 +719,10 @@ static gboolean OnDrawTable(GtkWidget *widget, cairo_t *cr, gpointer data)
         gboolean isLocal   = (s == g_LocalSeat);
         gboolean isTurn = (g_pTable != NULL && g_pTable->activeIdx == s);
         gboolean isDealer = (g_pTable != NULL && g_pTable->dealerIdx == s);
-        gboolean showCards = isLocal ||
-                             (g_pTable != NULL && g_pTable->state == GAME_STATE_SHOWDOWN);
-
         const Player *p = (g_pTable != NULL) ? &g_pTable->players[s] : NULL;
+        gboolean showCards = isLocal ||
+                             (p != NULL && p->cardsVisible) ||
+                             (g_pTable != NULL && g_pTable->state == GAME_STATE_SHOWDOWN);
 
         DrawSeat(cr, sx, sy, p, s, isLocal, showCards, isTurn, isDealer);
     }
@@ -915,9 +931,17 @@ static GtkWidget* CreateTablePage(void)
     gtk_box_pack_start(GTK_BOX(tableVBox), pButtonStartGame, FALSE, FALSE, 5);
     g_signal_connect(pButtonStartGame, "clicked", G_CALLBACK(OnStartGameClicked), NULL);
     
+    pButtonNextHand = gtk_button_new_with_label("NEXT HAND");
+    gtk_widget_set_margin_start(pButtonNextHand, MARGIN_BUTTON_AREA);
+    gtk_widget_set_margin_end(pButtonNextHand, MARGIN_BUTTON_AREA);
+    gtk_box_pack_start(GTK_BOX(tableVBox), pButtonNextHand, FALSE, FALSE, 5);
+    g_signal_connect(pButtonNextHand, "clicked", G_CALLBACK(OnNextHandClicked), NULL);
+    
     /* Hide by default until network sync confirms Seat 0 */
     gtk_widget_set_no_show_all(pButtonStartGame, TRUE);
     gtk_widget_hide(pButtonStartGame);
+    gtk_widget_set_no_show_all(pButtonNextHand, TRUE);
+    gtk_widget_hide(pButtonNextHand);
 
     GtkWidget *pHBox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_widget_set_margin_start(pHBox, MARGIN_BUTTON_AREA);
@@ -1010,11 +1034,23 @@ void SyncGUIWithGameState(void)
     /* Host Button Visibility Toggle */
     if (g_pTable->state == 0 && g_LocalSeat == 0) {
         gtk_widget_show(pButtonStartGame);
+        gtk_widget_set_sensitive(pButtonStartGame, TRUE);
     } else {
         gtk_widget_hide(pButtonStartGame);
     }
 
-    if (g_pTable->state != 0 && g_pTable->activeIdx == g_LocalSeat && !g_pTable->players[g_LocalSeat].isFolded) {
+    if (g_pTable->state == GAME_STATE_SHOWDOWN && g_LocalSeat == 0) {
+        gtk_widget_show(pButtonNextHand);
+        gtk_widget_set_sensitive(pButtonNextHand, TRUE);
+    } else {
+        gtk_widget_hide(pButtonNextHand);
+    }
+
+    if (g_pTable->state != 0 &&
+        g_pTable->state != GAME_STATE_SHOWDOWN &&
+        g_pTable->activeIdx == g_LocalSeat &&
+        !g_pTable->players[g_LocalSeat].isFolded &&
+        !g_pTable->players[g_LocalSeat].outOfGame) {
         SetActionButtonsSensitive(TRUE);
     } else {
         SetActionButtonsSensitive(FALSE);
@@ -1043,18 +1079,57 @@ void ClientReceiveCommunityCard(int index, int rank, char suit)
     }
 }
 
-void ClientSyncSeat(int seat, const char* name, int points, int isFolded)
+void ClientSyncSeat(int seat, const char* name, int points, int isFolded, int outOfGame)
 {
     if (g_pTable && seat >= 0 && seat < MAX_PLAYERS) {
         strncpy(g_pTable->players[seat].name, name, MAX_NAME_LEN - 1);
         g_pTable->players[seat].name[MAX_NAME_LEN - 1] = '\0';
         g_pTable->players[seat].points = points;
         g_pTable->players[seat].isFolded = isFolded;
+        g_pTable->players[seat].outOfGame = outOfGame;
         TriggerTableRedraw();
         
-        /* Force the Telemetry HUD to refresh once local points are loaded */
         if (seat == g_LocalSeat) {
             SyncGUIWithGameState();
         }
     }
+}
+
+void ClientReceiveShowdownCards(int seat, int r1, char s1, int r2, char s2)
+{
+    if (g_pTable && seat >= 0 && seat < MAX_PLAYERS) {
+        g_pTable->players[seat].hand[0].rank = r1;
+        g_pTable->players[seat].hand[0].suit = s1;
+        g_pTable->players[seat].hand[1].rank = r2;
+        g_pTable->players[seat].hand[1].suit = s2;
+        g_pTable->players[seat].cardsVisible = 1;
+        TriggerTableRedraw();
+        SyncGUIWithGameState();
+    }
+}
+
+void ClientApplyRoundUpdate(int activeIdx, int pot, int state, int dealerIdx, int callAmount, int minRaise)
+{
+    if (g_pTable == NULL) {
+        return;
+    }
+
+    if (state == GAME_STATE_PRE_FLOP && g_pTable->state == GAME_STATE_SHOWDOWN) {
+        memset(g_pTable->community, 0, sizeof(g_pTable->community));
+        for (int s = 0; s < MAX_PLAYERS; s++) {
+            if (s != g_LocalSeat) {
+                g_pTable->players[s].hand[0].rank = 0;
+                g_pTable->players[s].hand[0].suit = 0;
+                g_pTable->players[s].hand[1].rank = 0;
+                g_pTable->players[s].hand[1].suit = 0;
+                g_pTable->players[s].cardsVisible = 0;
+            }
+        }
+    }
+
+    g_pTable->activeIdx = activeIdx;
+    g_pTable->pot = pot;
+    g_pTable->state = state;
+    g_pTable->dealerIdx = dealerIdx;
+    UpdateActionContext(callAmount, minRaise);
 }
